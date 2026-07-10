@@ -1,0 +1,54 @@
+import { describe, expect, it } from 'vitest';
+import { matchCommand, matchCorrection } from '../src/lib/commands';
+
+describe('matchCommand', () => {
+  it('reconoce los comandos base', () => {
+    expect(matchCommand('/hoy')).toEqual({ kind: 'hoy' });
+    expect(matchCommand('/semana')).toEqual({ kind: 'semana' });
+    expect(matchCommand('/mes')).toEqual({ kind: 'mes' });
+    expect(matchCommand('/reporte')).toEqual({ kind: 'reporte' });
+  });
+
+  it('tolera @NombreDelBot y mayúsculas', () => {
+    expect(matchCommand('/hoy@FinanzasBot')).toEqual({ kind: 'hoy' });
+    expect(matchCommand('/HOY')).toEqual({ kind: 'hoy' });
+  });
+
+  it('borrar con número, con # y sin argumento', () => {
+    expect(matchCommand('/borrar 3')).toEqual({ kind: 'borrar', shortId: 3 });
+    expect(matchCommand('/borrar #2')).toEqual({ kind: 'borrar', shortId: 2 });
+    expect(matchCommand('/borrar')).toEqual({ kind: 'borrar', shortId: null });
+    expect(matchCommand('/borrar abc')).toEqual({ kind: 'borrar', shortId: null });
+  });
+
+  it('start/help/ayuda → ayuda', () => {
+    expect(matchCommand('/start')).toEqual({ kind: 'ayuda' });
+    expect(matchCommand('/help')).toEqual({ kind: 'ayuda' });
+    expect(matchCommand('/ayuda')).toEqual({ kind: 'ayuda' });
+  });
+
+  it('texto normal no es comando', () => {
+    expect(matchCommand('gasté Q45 en almuerzo')).toBeNull();
+    expect(matchCommand('hoy nada')).toBeNull();
+  });
+});
+
+describe('matchCorrection', () => {
+  it('forma canónica con #', () => {
+    expect(matchCorrection('corrige #2 eran Q50')).toEqual({ shortId: 2, text: 'eran Q50' });
+  });
+
+  it('variantes: sin #, con dos puntos, mayúsculas, artículo', () => {
+    expect(matchCorrection('Corrige 3: fue con débito')).toEqual({ shortId: 3, text: 'fue con débito' });
+    expect(matchCorrection('corrige el #1, la categoría es transporte')).toEqual({
+      shortId: 1,
+      text: 'la categoría es transporte',
+    });
+  });
+
+  it('no confunde texto normal', () => {
+    expect(matchCorrection('gasté Q45 en almuerzo')).toBeNull();
+    expect(matchCorrection('corrige')).toBeNull();
+    expect(matchCorrection('corrige #2')).toBeNull();
+  });
+});

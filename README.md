@@ -1,0 +1,143 @@
+# finanzas-web 💰
+
+Bot de Telegram para registrar finanzas personales (quetzales, GTQ) con mínima fricción: le escribes o le mandas una **nota de voz** con los movimientos del día, la IA los estructura y quedan guardados en DynamoDB. Incluye recordatorios diarios, comandos de consulta y un reporte mensual con análisis.
+
+## Arquitectura
+
+```
+Telegram ──webhook──▶ API Gateway (HTTP API) ──▶ Lambda webhook ──▶ DynamoDB (single-table)
+                                                    │  ├─ AI SDK (LLM_PROVIDER) → parseo/corrección/narrativa
+                                                    │  └─ STT (STT_PROVIDER)    → transcripción de voz
+EventBridge Scheduler (hora de Guatemala)
+  ├─ 17:00 diario  ──▶ Lambda reminder (recordatorio)
+  ├─ 21:00 diario  ──▶ Lambda reminder (seguimiento solo si no respondiste)
+  └─ 08:00 día 1   ──▶ Lambda monthly-report (reporte del mes cerrado)
+```
+
+- **Stack**: Node.js 24 + TypeScript, AWS CDK v2, pnpm, Vitest.
+- **IA agnóstica de proveedor**: [Vercel AI SDK](https://ai-sdk.dev). Hoy usa Claude (`claude-haiku-4-5`); cambiar a OpenAI/MiniMax/Google es instalar el provider y cambiar env vars (ver abajo).
+- **Voz**: Amazon Transcribe **streaming** (`ogg-opus` directo, español `es-US`) — sin S3, detrás de un puerto intercambiable (`src/lib/stt/`).
+- **Deploy**: automático con GitHub Actions en cada push a `main` (environment `production` + OIDC, sin access keys).
+- **Costo**: free tier / centavos al mes (DynamoDB on-demand, Lambdas arm64, sin recursos provisioned).
+
+## Comandos del bot
+
+| Comando | Qué hace |
+|---|---|
+| (texto o voz libre) | Registra movimientos: "almuerzo Q45 en efectivo y Q200 de gasolina con la de crédito" |
+| `hoy nada` | Marca el día sin movimientos (apaga el seguimiento de las 21:00) |
+| `/hoy` | Movimientos del día |
+| `/semana` | Resumen de los últimos 7 días por categoría |
+| `/mes` | Resumen del mes en curso |
+| `/reporte` | Reporte completo del mes en curso con análisis de la IA |
+| `/borrar N` | Elimina el movimiento #N de hoy |
+| `corrige #N ...` | Corrige un movimiento en lenguaje natural: "corrige #2 eran Q50 con débito" |
+
+## Setup inicial (una sola vez)
+
+### 1. Crear el bot con BotFather
+
+1. En Telegram, habla con [@BotFather](https://t.me/BotFather) → `/newbot`.
+2. Dale nombre y username. Guarda el **token** (`123456:ABC-DEF...`).
+
+### 2. Obtener tu chat_id
+
+1. Mándale cualquier mensaje a tu bot recién creado.
+2. Abre `https://api.telegram.org/bot<TOKEN>/getUpdates` en el navegador.
+3. Copia `result[0].message.chat.id` — ese número es tu `ALLOWED_CHAT_ID`.
+
+### 3. API key del proveedor de IA
+
+Crea una API key en [console.anthropic.com](https://console.anthropic.com) (o la del proveedor que elijas).
+
+### 4. Bootstrap de AWS (con tus credenciales locales)
+
+```bash
+pnpm install
+pnpm cdk bootstrap                # una vez por cuenta/región
+pnpm cdk deploy GithubOidcStack -c githubRepo=<owner>/<repo>
+```
+
+El output `DeployRoleArn` es el ARN del rol que asumirá GitHub Actions.
+
+### 5. Repo de GitHub + environment `production`
+
+1. Crea el repo y haz push de este proyecto a `main` (el primer push ya intenta deployar; configura el environment antes o relanza el workflow después).
+2. En **Settings → Environments → New environment** crea `production`.
+3. Agrega los **secrets** del environment:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_WEBHOOK_SECRET` — inventa uno largo, solo `A-Za-z0-9_-` (p.ej. `openssl rand -hex 32`)
+   - `ANTHROPIC_API_KEY`
+   - `ALLOWED_CHAT_ID`
+4. Agrega la **variable** del environment:
+   - `AWS_DEPLOY_ROLE_ARN` = el `DeployRoleArn` del paso 4.
+
+### 6. Listo
+
+Cada push a `main` corre typecheck + tests + synth y deploya. El último paso del workflow registra el webhook en Telegram automáticamente (`setWebhook` con el secret token). Mándale un mensaje al bot: *"gasté Q45 en almuerzo en efectivo"*.
+
+## Cambiar de proveedor de IA (sin tocar la lógica)
+
+El único punto de acoplamiento es `src/lib/ai/llm.ts` (LLM) y `src/lib/stt/index.ts` (voz).
+
+**Ejemplo — pasar a OpenAI:**
+
+```bash
+pnpm add @ai-sdk/openai
+```
+
+```ts
+// src/lib/ai/llm.ts
+case 'openai':
+  return createOpenAI()(config.llmModel);
+```
+
+Y en el environment de GitHub: secret `OPENAI_API_KEY`, variables `LLM_PROVIDER=openai`, `LLM_MODEL=gpt-...` (pásalas al deploy como env en el workflow, igual que las demás). MiniMax/DeepSeek/otros compatibles con OpenAI: `@ai-sdk/openai-compatible` con `baseURL`.
+
+## Desarrollo local
+
+```bash
+pnpm install
+pnpm typecheck        # TypeScript estricto
+pnpm test             # vitest (lógica pura: fechas, comandos, agregados, schema, formato)
+pnpm synth            # sintetiza la infraestructura sin deployar
+```
+
+Deploy manual de emergencia (mismo efecto que el workflow):
+
+```bash
+cp .env.example .env  # llénalo
+# carga el .env al entorno (ver comentario dentro del archivo) y luego:
+pnpm deploy
+pnpm set-webhook
+```
+
+## Estructura
+
+```
+bin/, lib/           # CDK: app, FinanzasStack (tabla, lambdas, HTTP API, schedules), GithubOidcStack
+src/handlers/        # webhook, reminder, monthly-report
+src/lib/ai/          # AI SDK: factory de modelo, schema zod, prompts, parseo/corrección/narrativa
+src/lib/stt/         # puerto de transcripción + adapter Transcribe streaming
+src/lib/             # dynamo, telegram, fechas GT, formato, comandos, agregados, reporte
+test/                # vitest de la lógica pura
+scripts/             # set-webhook.mjs (lo corre el workflow en cada deploy)
+.github/workflows/   # deploy.yml (CI + deploy con OIDC)
+```
+
+## Modelo de datos (DynamoDB single-table `finanzas-personales`)
+
+| Item | PK | SK | Atributos |
+|---|---|---|---|
+| Movimiento | `USER#allan` | `TXN#<yyyy-mm-dd>#<ulid>` | amount, type, category, method, description, rawMessage, shortId, createdAt |
+| Estado del día | `USER#allan` | `DAY#<fecha>` | reported, lastShortId (contador atómico de shortIds) |
+| Dedupe de updates | `USER#allan` | `UPDATE#<update_id>` | ttl (48h) |
+
+Consultas por prefijo de SK (`begins_with(SK, "TXN#2026-07")`) — sin GSI.
+
+## Notas de seguridad
+
+- Webhook protegido con `X-Telegram-Bot-Api-Secret-Token`; cualquier `chat_id` distinto al tuyo se ignora.
+- Updates idempotentes por `update_id` (Telegram reintenta).
+- IAM mínimo por Lambda; AWS desde GitHub vía OIDC (cero credenciales de larga vida).
+- Los secretos viven en el environment `production` de GitHub. No commitees `.env`.
