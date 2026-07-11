@@ -25,7 +25,7 @@ EventBridge Scheduler (hora de Guatemala)
 | Comando | Qué hace |
 |---|---|
 | (texto o voz libre) | Registra movimientos: "almuerzo Q45 en efectivo y Q200 de gasolina con la de crédito" |
-| `hoy nada` | Marca el día sin movimientos (apaga el seguimiento de las 21:00) |
+| `/nada` (o "hoy nada") | Marca el día sin movimientos (apaga el seguimiento de las 21:00) |
 | `/hoy` | Movimientos del día |
 | `/semana` | Resumen de los últimos 7 días por categoría |
 | `/mes` | Resumen del mes en curso |

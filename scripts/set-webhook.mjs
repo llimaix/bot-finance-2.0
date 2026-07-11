@@ -51,3 +51,27 @@ if (!data.ok) {
   process.exit(1);
 }
 console.log(`✅ Webhook registrado: ${url}`);
+
+// Menú de comandos (autocompletado al escribir "/" en Telegram).
+// Mantener en sincronía con BOT_COMMANDS en src/lib/commands.ts.
+const commands = [
+  { command: 'hoy', description: 'Movimientos del día' },
+  { command: 'semana', description: 'Resumen de los últimos 7 días' },
+  { command: 'mes', description: 'Resumen del mes en curso' },
+  { command: 'reporte', description: 'Reporte del mes con análisis' },
+  { command: 'nada', description: 'Registrar día sin movimientos' },
+  { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
+  { command: 'ayuda', description: 'Cómo usar el bot' },
+];
+
+const cmdRes = await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ commands }),
+});
+const cmdData = await cmdRes.json();
+if (!cmdData.ok) {
+  console.error('setMyCommands falló:', cmdData.description ?? cmdData);
+  process.exit(1);
+}
+console.log(`✅ Menú de comandos registrado (${commands.length} comandos)`);

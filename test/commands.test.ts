@@ -21,6 +21,11 @@ describe('matchCommand', () => {
     expect(matchCommand('/borrar abc')).toEqual({ kind: 'borrar', shortId: null });
   });
 
+  it('atajo /nada', () => {
+    expect(matchCommand('/nada')).toEqual({ kind: 'nada' });
+    expect(matchCommand('/nada@MiPistoGTBot')).toEqual({ kind: 'nada' });
+  });
+
   it('start/help/ayuda → ayuda', () => {
     expect(matchCommand('/start')).toEqual({ kind: 'ayuda' });
     expect(matchCommand('/help')).toEqual({ kind: 'ayuda' });

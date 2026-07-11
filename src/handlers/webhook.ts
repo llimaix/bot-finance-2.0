@@ -182,6 +182,11 @@ async function handleCommand(chatId: number, today: string, command: Command): P
       await sendMessage(chatId, HELP_TEXT);
       return;
 
+    case 'nada':
+      // El día ya quedó marcado como reportado en route(); atajo sin pasar por el LLM.
+      await sendMessage(chatId, '👍 Anotado: día sin movimientos.');
+      return;
+
     case 'hoy': {
       const txns = await queryDay(today);
       await sendMessage(chatId, renderDay(today, txns));

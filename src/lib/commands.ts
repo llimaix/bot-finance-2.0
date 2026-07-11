@@ -3,10 +3,11 @@ export type Command =
   | { kind: 'semana' }
   | { kind: 'mes' }
   | { kind: 'reporte' }
+  | { kind: 'nada' }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
-const COMMAND_RE = /^\/(hoy|semana|mes|reporte|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -23,6 +24,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'mes' };
     case 'reporte':
       return { kind: 'reporte' };
+    case 'nada':
+      return { kind: 'nada' };
     case 'borrar': {
       const n = Number.parseInt(arg?.replace(/^#/, '') ?? '', 10);
       return { kind: 'borrar', shortId: Number.isInteger(n) && n > 0 ? n : null };
@@ -61,7 +64,19 @@ export const HELP_TEXT = [
   '/semana — resumen de los últimos 7 días',
   '/mes — resumen del mes en curso',
   '/reporte — reporte completo del mes con análisis',
+  '/nada — registrar día sin movimientos',
   '/borrar N — elimina el movimiento #N de hoy',
   '',
   'También puedes corregir: "corrige #2 eran Q50"',
 ].join('\n');
+
+/** Menú de comandos que se registra en Telegram (setMyCommands) en cada deploy. */
+export const BOT_COMMANDS = [
+  { command: 'hoy', description: 'Movimientos del día' },
+  { command: 'semana', description: 'Resumen de los últimos 7 días' },
+  { command: 'mes', description: 'Resumen del mes en curso' },
+  { command: 'reporte', description: 'Reporte del mes con análisis' },
+  { command: 'nada', description: 'Registrar día sin movimientos' },
+  { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
+  { command: 'ayuda', description: 'Cómo usar el bot' },
+] as const;
