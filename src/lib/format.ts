@@ -1,3 +1,4 @@
+import { computeAggregates } from './aggregates';
 import { DEFAULT_CATEGORY_EMOJI, SEED_CATEGORY_EMOJI } from './categories';
 import type { Method, Transaction, TxnType } from './types';
 
@@ -53,19 +54,39 @@ function prefixed(txn: Transaction): string {
 
 export function renderConfirmation(opts: {
   txns: Transaction[];
+  /** Fecha de hoy: los movimientos retroactivos se marcan con su fecha. */
+  today: string;
   totalSpentToday: number;
   clarification: string | null;
   transcript?: string;
+  header?: string;
 }): string {
   const lines: string[] = [];
+  if (opts.header) lines.push(opts.header, '');
   if (opts.transcript) lines.push(`🎙️ Escuché: "${escapeHtml(opts.transcript)}"`, '');
   const n = opts.txns.length;
   lines.push(`✅ Registrado (${n} ${n === 1 ? 'movimiento' : 'movimientos'}):`);
-  for (const txn of opts.txns) lines.push(renderTxnLine(txn));
+  for (const txn of opts.txns) {
+    const dateSuffix = txn.date !== opts.today ? ` · 📅 ${txn.date}` : '';
+    lines.push(`${renderTxnLine(txn)}${dateSuffix}`);
+  }
   lines.push(`Total gastado hoy: ${formatQ(opts.totalSpentToday)}`);
   if (opts.clarification) lines.push('', `❓ ${escapeHtml(opts.clarification)}`);
   lines.push('', 'Si algo está mal, responde: "corrige #2 ..."');
   return lines.join('\n');
+}
+
+/** CSV para Excel (BOM UTF-8 + CRLF), una fila por movimiento. */
+export function toCsv(txns: ReadonlyArray<Transaction>): string {
+  const BOM = String.fromCharCode(0xfeff);
+  const esc = (v: string) => `"${v.replaceAll('"', '""')}"`;
+  const rows = [
+    'fecha,tipo,categoria,metodo,monto,descripcion',
+    ...[...txns]
+      .sort((a, b) => a.sk.localeCompare(b.sk))
+      .map((t) => [t.date, t.type, t.category, t.method, t.amount.toFixed(2), esc(t.description)].join(',')),
+  ];
+  return BOM + rows.join('\r\n') + '\r\n';
 }
 
 export function renderDay(date: string, txns: Transaction[]): string {
@@ -77,4 +98,22 @@ export function renderDay(date: string, txns: Transaction[]): string {
 
 export function sumSpent(txns: Transaction[]): number {
   return txns.filter((t) => t.type === 'gasto').reduce((acc, t) => acc + t.amount, 0);
+}
+
+/** Resumen de los últimos 7 días por categoría (comando /semana y resumen dominical). */
+export function renderWeek(txns: Transaction[]): string {
+  if (txns.length === 0) return '📭 Sin movimientos en los últimos 7 días.';
+  const agg = computeAggregates(txns, 7);
+  const lines = [
+    '📅 <b>Últimos 7 días</b>',
+    '',
+    `💸 Gastos: ${formatQ(agg.totalGastos)}`,
+    `📈 Promedio diario: ${formatQ(agg.dailyAverage)}`,
+    '',
+  ];
+  const cats = Object.entries(agg.byCategory).sort(([, a], [, b]) => b.sum - a.sum);
+  for (const [cat, data] of cats) {
+    lines.push(`${emojiForCategory(cat, txns)} ${cat}: ${formatQ(data.sum)} (${data.count})`);
+  }
+  return lines.join('\n');
 }

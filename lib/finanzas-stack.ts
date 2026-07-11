@@ -139,6 +139,15 @@ export class FinanzasStack extends Stack {
       description: 'Seguimiento 21:00 GT si no hubo respuesta',
     });
 
+    new scheduler.Schedule(this, 'WeeklySummary', {
+      schedule: scheduler.ScheduleExpression.cron({ minute: '0', hour: '20', weekDay: 'SUN', timeZone: GT }),
+      target: new targets.LambdaInvoke(reminderFn, {
+        input: scheduler.ScheduleTargetInput.fromObject({ kind: 'weekly' }),
+        retryAttempts: 2,
+      }),
+      description: 'Resumen semanal domingo 20:00 GT',
+    });
+
     new scheduler.Schedule(this, 'MonthlyReport', {
       schedule: scheduler.ScheduleExpression.cron({ minute: '0', hour: '8', day: '1', timeZone: GT }),
       target: new targets.LambdaInvoke(monthlyFn, {

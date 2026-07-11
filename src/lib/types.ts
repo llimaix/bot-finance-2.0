@@ -72,7 +72,7 @@ export interface ParseResult {
   noMovements: boolean;
 }
 
-export type ScheduleKind = 'primary' | 'followup' | 'monthly';
+export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly';
 
 export interface ScheduleEvent {
   kind: ScheduleKind;

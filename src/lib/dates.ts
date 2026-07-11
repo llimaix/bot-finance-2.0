@@ -44,6 +44,30 @@ export function daysInMonth(yyyyMM: string): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
+/** Día de la semana de hoy en español ("viernes"), para orientar al parser. */
+export function weekdayGT(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('es-GT', { weekday: 'long', timeZone: GT_TIMEZONE }).format(now);
+}
+
+const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_BACKDATE_DAYS = 366;
+
+/**
+ * Valida la fecha que devolvió el LLM para un movimiento retroactivo.
+ * Reglas: formato yyyy-mm-dd real, sin futuro, máximo un año atrás.
+ * Cualquier cosa inválida cae en hoy.
+ */
+export function normalizeParsedDate(raw: string | null | undefined, today: string): string {
+  if (!raw || !ISO_DAY_RE.test(raw)) return today;
+  if (raw > today) return today;
+  const parsed = new Date(`${raw}T00:00:00Z`);
+  // round-trip: descarta fechas imposibles tipo 2026-02-31
+  if (parsed.toISOString().slice(0, 10) !== raw) return today;
+  const floor = new Date(`${today}T00:00:00Z`).getTime() - MAX_BACKDATE_DAYS * MS_PER_DAY;
+  if (parsed.getTime() < floor) return today;
+  return raw;
+}
+
 /** Etiqueta legible en español para un mes yyyy-mm, p.ej. "junio de 2026". */
 export function monthLabelES(yyyyMM: string): string {
   const [y, m] = yyyyMM.split('-').map(Number) as [number, number];

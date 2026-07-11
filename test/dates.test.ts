@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from '../src/lib/dates';
+import {
+  daysAgoGT,
+  daysElapsedInMonthGT,
+  daysInMonth,
+  monthLabelES,
+  monthPrefixGT,
+  normalizeParsedDate,
+  todayGT,
+  weekdayGT,
+} from '../src/lib/dates';
 
 describe('todayGT', () => {
   it('convierte UTC a fecha de Guatemala (UTC-6)', () => {
@@ -54,6 +63,34 @@ describe('daysElapsedInMonthGT / daysInMonth', () => {
     expect(daysInMonth('2026-07')).toBe(31);
     expect(daysInMonth('2028-02')).toBe(29);
     expect(daysInMonth('2026-02')).toBe(28);
+  });
+});
+
+describe('normalizeParsedDate', () => {
+  const today = '2026-07-10';
+
+  it('acepta fechas pasadas válidas', () => {
+    expect(normalizeParsedDate('2026-07-08', today)).toBe('2026-07-08');
+    expect(normalizeParsedDate('2025-12-31', today)).toBe('2025-12-31');
+  });
+
+  it('null o formato inválido caen en hoy', () => {
+    expect(normalizeParsedDate(null, today)).toBe(today);
+    expect(normalizeParsedDate('ayer', today)).toBe(today);
+    expect(normalizeParsedDate('08/07/2026', today)).toBe(today);
+  });
+
+  it('rechaza futuro, fechas imposibles y más de un año atrás', () => {
+    expect(normalizeParsedDate('2026-07-11', today)).toBe(today);
+    expect(normalizeParsedDate('2026-02-31', today)).toBe(today);
+    expect(normalizeParsedDate('2024-01-01', today)).toBe(today);
+  });
+});
+
+describe('weekdayGT', () => {
+  it('día de semana en español según hora de Guatemala', () => {
+    // 2026-07-10 es viernes
+    expect(weekdayGT(new Date('2026-07-10T18:00:00Z')).toLowerCase()).toBe('viernes');
   });
 });
 

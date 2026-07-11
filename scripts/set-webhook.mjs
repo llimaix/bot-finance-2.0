@@ -39,7 +39,8 @@ const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
   body: JSON.stringify({
     url,
     secret_token: secret,
-    allowed_updates: ['message'],
+    // callback_query: botones inline de borrado bajo cada confirmación
+    allowed_updates: ['message', 'callback_query'],
     // false: no descartar updates pendientes en cada deploy
     drop_pending_updates: false,
   }),
@@ -61,6 +62,7 @@ const commands = [
   { command: 'reporte', description: 'Reporte del mes con análisis' },
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
+  { command: 'export', description: 'Exportar el mes en curso como CSV' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },
 ];

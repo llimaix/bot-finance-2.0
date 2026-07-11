@@ -1,6 +1,7 @@
 import { ulid } from 'ulid';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { correctTransaction, parseTransactions } from '../lib/ai/parse';
+import { correctTransaction, parseReceipt, parseTransactions } from '../lib/ai/parse';
+import type { ParseOutcome } from '../lib/ai/parse';
 import { HELP_TEXT, matchCommand, matchCorrection } from '../lib/commands';
 import type { Command } from '../lib/commands';
 import { config } from '../lib/config';
@@ -8,6 +9,7 @@ import { daysAgoGT, daysElapsedInMonthGT, monthLabelES, monthPrefixGT, todayGT }
 import {
   deleteTransaction,
   findByShortId,
+  getTransaction,
   listCategories,
   markReported,
   markReportedAndReserveShortIds,
@@ -20,20 +22,24 @@ import {
   updateTransactionFields,
 } from '../lib/dynamo';
 import {
-  emojiForCategory,
   escapeHtml,
-  formatQ,
   renderConfirmation,
   renderDay,
   renderTxnLine,
+  renderWeek,
   sumSpent,
+  toCsv,
 } from '../lib/format';
-import { computeAggregates } from '../lib/aggregates';
 import { logger } from '../lib/logger';
 import { buildReport } from '../lib/report';
 import { getSttProvider } from '../lib/stt';
-import { getFileBuffer, sendMessage } from '../lib/telegram';
-import type { TelegramMessage, TelegramUpdate } from '../lib/telegram';
+import { answerCallbackQuery, getFileBuffer, sendDocument, sendMessage } from '../lib/telegram';
+import type {
+  InlineKeyboardButton,
+  TelegramCallbackQuery,
+  TelegramMessage,
+  TelegramUpdate,
+} from '../lib/telegram';
 import type { Transaction } from '../lib/types';
 
 const OK: APIGatewayProxyStructuredResultV2 = { statusCode: 200, body: 'ok' };
@@ -50,8 +56,10 @@ export const handler = async (
   }
 
   const update = parseUpdate(event.body);
-  const message = update?.message;
-  if (!update || typeof update.update_id !== 'number' || !message) return OK;
+  if (!update || typeof update.update_id !== 'number') return OK;
+  const message = update.message;
+  const callback = update.callback_query;
+  if (!message && !callback) return OK;
 
   // 2. Idempotencia: Telegram reintenta updates; procesar cada update_id una sola vez
   if (!(await tryClaimUpdate(update.update_id))) {
@@ -59,24 +67,26 @@ export const handler = async (
     return OK;
   }
 
-  // 3. Bot personal: cualquier otro chat se ignora en silencio
-  const chatId = message.chat.id;
-  if (String(chatId) !== config.allowedChatId) {
-    logger.warn('chat no permitido', { chatId });
+  // 3. Bot personal: cualquier otro chat/usuario se ignora en silencio
+  const senderId = message?.chat.id ?? callback?.from.id;
+  if (String(senderId) !== config.allowedChatId) {
+    logger.warn('chat no permitido', { senderId });
     return OK;
   }
 
   try {
-    await route(message);
+    if (callback) await handleCallback(callback);
+    else if (message) await route(message);
   } catch (err) {
-    logger.error('fallo procesando el mensaje', {
+    logger.error('fallo procesando el update', {
       updateId: update.update_id,
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
     });
-    await sendMessage(chatId, ERROR_REPLY).catch((sendErr) =>
+    await sendMessage(senderId!, ERROR_REPLY).catch((sendErr) =>
       logger.error('no se pudo enviar el mensaje de error', { error: String(sendErr) }),
     );
+    if (callback) await answerCallbackQuery(callback.id).catch(() => undefined);
   }
 
   // 4. Siempre 200 después de reclamar el update: un non-2xx haría que Telegram
@@ -94,6 +104,8 @@ function parseUpdate(body: string | undefined): TelegramUpdate | null {
   }
 }
 
+// ── Ruteo de mensajes ──────────────────────────────────────────────────────
+
 async function route(message: TelegramMessage): Promise<void> {
   const chatId = message.chat.id;
   const today = todayGT();
@@ -102,16 +114,33 @@ async function route(message: TelegramMessage): Promise<void> {
   // recordatorio de seguimiento de las 21:00.
   await markReported(today);
 
+  // Foto de ticket/comprobante (o imagen adjunta como documento)
+  const photo = message.photo?.at(-1);
+  const imageDoc = message.document?.mime_type?.startsWith('image/') ? message.document : undefined;
+  if (photo || imageDoc) {
+    const fileId = photo?.file_id ?? imageDoc!.file_id;
+    const mediaType = imageDoc?.mime_type ?? 'image/jpeg';
+    const image = await getFileBuffer(fileId);
+    const outcome = await parseReceipt(image, mediaType, message.caption ?? null);
+    await saveAndConfirm(chatId, today, outcome, message.caption ?? '(foto de comprobante)', {
+      header: '🧾 Comprobante procesado',
+      emptyReply:
+        '🧾 No pude leer movimientos en la imagen. ¿Me cuentas el monto y qué fue en texto?',
+    });
+    return;
+  }
+
   if (message.voice) {
     const audio = await getFileBuffer(message.voice.file_id);
     const transcript = await getSttProvider().transcribe(audio, message.voice.mime_type);
-    await handleFreeText(chatId, today, transcript, transcript);
+    const outcome = await parseTransactions(transcript);
+    await saveAndConfirm(chatId, today, outcome, transcript, { transcript });
     return;
   }
 
   const text = message.text?.trim();
   if (!text) {
-    await sendMessage(chatId, 'Solo entiendo texto o notas de voz 🙏');
+    await sendMessage(chatId, 'Solo entiendo texto, notas de voz o fotos de tickets 🙏');
     return;
   }
 
@@ -127,22 +156,23 @@ async function route(message: TelegramMessage): Promise<void> {
     return;
   }
 
-  await handleFreeText(chatId, today, text);
+  const outcome = await parseTransactions(text);
+  await saveAndConfirm(chatId, today, outcome, text, {});
 }
 
-// ── Registro de movimientos ────────────────────────────────────────────────
+// ── Registro compartido (texto, voz y comprobantes) ────────────────────────
 
-async function handleFreeText(
+async function saveAndConfirm(
   chatId: number,
   today: string,
-  text: string,
-  transcript?: string,
+  outcome: ParseOutcome,
+  rawMessage: string,
+  opts: { transcript?: string; header?: string; emptyReply?: string },
 ): Promise<void> {
-  const { transactions, clarification, noMovements, createdCategories, categoryEmoji } =
-    await parseTransactions(text);
+  const { transactions, clarification, noMovements, createdCategories, categoryEmoji } = outcome;
 
   // En respuestas de voz, mostrar siempre lo que se escuchó.
-  const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
+  const heard = opts.transcript ? `🎙️ Escuché: "${escapeHtml(opts.transcript)}"\n\n` : '';
 
   if (transactions.length === 0) {
     if (clarification) {
@@ -150,10 +180,10 @@ async function handleFreeText(
     } else if (noMovements) {
       await sendMessage(chatId, `${heard}👍 Anotado: día sin movimientos.`);
     } else {
-      // Saludo o mensaje que no habla de dinero: no registrar nada.
       await sendMessage(
         chatId,
-        `${heard}👋 ¡Hola! No identifiqué movimientos en tu mensaje. Cuéntame tus gastos o ingresos del día, o dime "hoy nada" si no hubo.`,
+        opts.emptyReply ??
+          `${heard}👋 ¡Hola! No identifiqué movimientos en tu mensaje. Cuéntame tus gastos o ingresos del día, o dime "hoy nada" si no hubo.`,
       );
     }
     return;
@@ -165,29 +195,75 @@ async function handleFreeText(
     await putCategoryIfAbsent({ ...cat, source: 'auto', createdAt });
   }
 
-  const shortIds = await markReportedAndReserveShortIds(today, transactions.length);
-  const txns: Transaction[] = transactions.map((t, i) => ({
-    ...t,
-    sk: `TXN#${today}#${ulid()}`,
-    date: today,
-    shortId: shortIds[i]!,
-    rawMessage: text,
-    createdAt,
-    ...(categoryEmoji.has(t.category) ? { emoji: categoryEmoji.get(t.category)! } : {}),
-  }));
+  // Agrupar por fecha efectiva: los shortIds son por día ("ayer gasté..." reserva en ayer).
+  const byDate = new Map<string, typeof transactions>();
+  for (const t of transactions) {
+    const group = byDate.get(t.date) ?? [];
+    group.push(t);
+    byDate.set(t.date, group);
+  }
+
+  const txns: Transaction[] = [];
+  for (const [date, group] of byDate) {
+    const shortIds = await markReportedAndReserveShortIds(date, group.length);
+    group.forEach((t, i) => {
+      txns.push({
+        ...t,
+        sk: `TXN#${date}#${ulid()}`,
+        date,
+        shortId: shortIds[i]!,
+        rawMessage,
+        createdAt,
+        ...(categoryEmoji.has(t.category) ? { emoji: categoryEmoji.get(t.category)! } : {}),
+      });
+    });
+  }
   await putTransactions(txns);
 
   const todayTxns = await queryDay(today);
   let reply = renderConfirmation({
     txns,
+    today,
     totalSpentToday: sumSpent(todayTxns),
     clarification,
-    ...(transcript ? { transcript } : {}),
+    ...(opts.transcript ? { transcript: opts.transcript } : {}),
+    ...(opts.header ? { header: opts.header } : {}),
   });
   for (const cat of createdCategories) {
     reply += `\n🆕 Nueva categoría creada: ${cat.emoji} ${escapeHtml(cat.name)}`;
   }
-  await sendMessage(chatId, reply);
+  await sendMessage(chatId, reply, { keyboard: deleteKeyboard(txns) });
+}
+
+/** Botones 🗑️ por movimiento (callback_data del:<sk>, ≤64 bytes). */
+function deleteKeyboard(txns: Transaction[]): InlineKeyboardButton[][] {
+  const buttons = txns.map((t) => ({ text: `🗑️ #${t.shortId}`, callback_data: `del:${t.sk}` }));
+  const rows: InlineKeyboardButton[][] = [];
+  for (let i = 0; i < buttons.length; i += 3) rows.push(buttons.slice(i, i + 3));
+  return rows;
+}
+
+// ── Botones inline ─────────────────────────────────────────────────────────
+
+async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
+  const chatId = callback.from.id;
+  const data = callback.data ?? '';
+
+  if (data.startsWith('del:')) {
+    const sk = data.slice(4);
+    const txn = await getTransaction(sk);
+    if (!txn) {
+      await answerCallbackQuery(callback.id, 'Ese movimiento ya no existe');
+      return;
+    }
+    await deleteTransaction(sk);
+    await answerCallbackQuery(callback.id, 'Eliminado 🗑️');
+    await sendMessage(chatId, `🗑️ Eliminado:\n${renderTxnLine(txn)}${txn.date !== todayGT() ? ` · 📅 ${txn.date}` : ''}`);
+    return;
+  }
+
+  logger.warn('callback no reconocido', { data });
+  await answerCallbackQuery(callback.id);
 }
 
 // ── Comandos ───────────────────────────────────────────────────────────────
@@ -221,6 +297,22 @@ async function handleCommand(chatId: number, today: string, command: Command): P
         lines.push('', 'Cuando un movimiento no encaje en ninguna, crearé una nueva automáticamente.');
       }
       await sendMessage(chatId, lines.join('\n'));
+      return;
+    }
+
+    case 'export': {
+      const month = monthPrefixGT(0);
+      const txns = await queryMonth(month);
+      if (txns.length === 0) {
+        await sendMessage(chatId, `📭 Sin movimientos en ${monthLabelES(month)} para exportar.`);
+        return;
+      }
+      await sendDocument(
+        chatId,
+        `finanzas-${month}.csv`,
+        toCsv(txns),
+        `📤 ${txns.length} movimientos de ${monthLabelES(month)}`,
+      );
       return;
     }
 
@@ -279,18 +371,6 @@ async function handleCommand(chatId: number, today: string, command: Command): P
       return;
     }
   }
-}
-
-/** Resumen de los últimos 7 días por categoría. */
-function renderWeek(txns: Transaction[]): string {
-  if (txns.length === 0) return '📭 Sin movimientos en los últimos 7 días.';
-  const agg = computeAggregates(txns, 7);
-  const lines = ['📅 <b>Últimos 7 días</b>', '', `💸 Gastos: ${formatQ(agg.totalGastos)}`, `📈 Promedio diario: ${formatQ(agg.dailyAverage)}`, ''];
-  const cats = Object.entries(agg.byCategory).sort(([, a], [, b]) => b.sum - a.sum);
-  for (const [cat, data] of cats) {
-    lines.push(`${emojiForCategory(cat, txns)} ${cat}: ${formatQ(data.sum)} (${data.count})`);
-  }
-  return lines.join('\n');
 }
 
 // ── Correcciones "corrige #N ..." ─────────────────────────────────────────

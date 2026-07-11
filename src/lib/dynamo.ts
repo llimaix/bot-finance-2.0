@@ -214,6 +214,13 @@ export async function queryRange(fromDate: string, toDate: string): Promise<Tran
   return items;
 }
 
+export async function getTransaction(sk: string): Promise<Transaction | undefined> {
+  const res = await doc.send(
+    new GetCommand({ TableName: config.tableName, Key: { PK, SK: sk } }),
+  );
+  return res.Item ? toTransaction(res.Item) : undefined;
+}
+
 export async function findByShortId(date: string, shortId: number): Promise<Transaction | undefined> {
   const txns = await queryDay(date);
   return txns.find((t) => t.shortId === shortId);

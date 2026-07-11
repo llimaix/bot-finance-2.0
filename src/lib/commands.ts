@@ -5,10 +5,11 @@ export type Command =
   | { kind: 'reporte' }
   | { kind: 'nada' }
   | { kind: 'categorias' }
+  | { kind: 'export' }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
-const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|export|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -29,6 +30,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'nada' };
     case 'categorias':
       return { kind: 'categorias' };
+    case 'export':
+      return { kind: 'export' };
     case 'borrar': {
       const n = Number.parseInt(arg?.replace(/^#/, '') ?? '', 10);
       return { kind: 'borrar', shortId: Number.isInteger(n) && n > 0 ? n : null };
@@ -69,9 +72,10 @@ export const HELP_TEXT = [
   '/reporte — reporte completo del mes con análisis',
   '/nada — registrar día sin movimientos',
   '/categorias — tu base de conocimientos de categorías',
+  '/export — el mes en curso como archivo CSV',
   '/borrar N — elimina el movimiento #N de hoy',
   '',
-  'También puedes corregir: "corrige #2 eran Q50"',
+  'También puedes: mandar la 📸 foto de un ticket (con caption opcional), decir "ayer gasté..." para fechas pasadas, y corregir con "corrige #2 eran Q50".',
   '',
   'Las categorías se organizan solas: si un movimiento no encaja en ninguna, el bot crea una nueva automáticamente.',
 ].join('\n');
@@ -84,6 +88,7 @@ export const BOT_COMMANDS = [
   { command: 'reporte', description: 'Reporte del mes con análisis' },
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
+  { command: 'export', description: 'Exportar el mes en curso como CSV' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },
 ] as const;

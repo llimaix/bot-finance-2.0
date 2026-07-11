@@ -16,6 +16,9 @@ export const parsedTransactionSchema = z.object({
   category: z.string().min(1),
   method: z.enum(METHODS),
   description: z.string(),
+  // yyyy-mm-dd cuando el mensaje/comprobante indica la fecha; null = hoy.
+  // Se valida y acota en código (normalizeParsedDate).
+  date: z.string().nullable(),
 });
 
 export const newCategorySchema = z.object({

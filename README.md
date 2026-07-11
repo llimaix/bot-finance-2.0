@@ -9,9 +9,10 @@ Telegram ──webhook──▶ API Gateway (HTTP API) ──▶ Lambda webhook 
                                                     │  ├─ AI SDK (LLM_PROVIDER) → parseo/corrección/narrativa
                                                     │  └─ STT (STT_PROVIDER)    → transcripción de voz
 EventBridge Scheduler (hora de Guatemala)
-  ├─ 17:00 diario  ──▶ Lambda reminder (recordatorio)
-  ├─ 21:00 diario  ──▶ Lambda reminder (seguimiento solo si no respondiste)
-  └─ 08:00 día 1   ──▶ Lambda monthly-report (reporte del mes cerrado)
+  ├─ 17:00 diario     ──▶ Lambda reminder (recordatorio)
+  ├─ 21:00 diario     ──▶ Lambda reminder (seguimiento solo si no respondiste)
+  ├─ 20:00 domingo    ──▶ Lambda reminder (resumen semanal)
+  └─ 08:00 día 1      ──▶ Lambda monthly-report (reporte del mes cerrado)
 ```
 
 - **Stack**: Node.js 24 + TypeScript, AWS CDK v2, pnpm, Vitest.
@@ -25,14 +26,19 @@ EventBridge Scheduler (hora de Guatemala)
 | Comando | Qué hace |
 |---|---|
 | (texto o voz libre) | Registra movimientos: "almuerzo Q45 en efectivo y Q200 de gasolina con la de crédito" |
+| 📸 (foto de ticket) | Lee el comprobante con visión: total, comercio, fecha y método; el caption da contexto ("con la de crédito") |
+| "ayer gasté..." | Fechas retroactivas: "ayer", "el lunes", "el 5 de julio" registran en la fecha real (hasta 1 año atrás) |
 | `/nada` (o "hoy nada") | Marca el día sin movimientos (apaga el seguimiento de las 21:00) |
+| `/export` | El mes en curso como archivo CSV (Excel) |
 | `/hoy` | Movimientos del día |
 | `/semana` | Resumen de los últimos 7 días por categoría |
 | `/mes` | Resumen del mes en curso |
 | `/reporte` | Reporte completo del mes en curso con análisis de la IA |
 | `/categorias` | Ver la base de conocimientos de categorías |
-| `/borrar N` | Elimina el movimiento #N de hoy |
+| `/borrar N` | Elimina el movimiento #N de hoy (o usa el botón 🗑️ bajo cada confirmación) |
 | `corrige #N ...` | Corrige un movimiento en lenguaje natural: "corrige #2 eran Q50 con débito" |
+
+Cada confirmación trae **botones inline** `🗑️ #N` para borrar al toque, y los domingos a las 20:00 llega un **resumen semanal** automático.
 
 ## Setup inicial (una sola vez)
 

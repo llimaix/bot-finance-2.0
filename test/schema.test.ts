@@ -5,8 +5,8 @@ describe('parseResultSchema', () => {
   it('acepta el formato del system prompt', () => {
     const parsed = parseResultSchema.parse({
       transactions: [
-        { amount: 45, type: 'gasto', category: 'comida', method: 'efectivo', description: 'almuerzo' },
-        { amount: 1500, type: 'deposito', category: 'ahorro', method: 'na', description: 'depósito ahorro' },
+        { amount: 45, type: 'gasto', category: 'comida', method: 'efectivo', description: 'almuerzo', date: null },
+        { amount: 1500, type: 'deposito', category: 'ahorro', method: 'na', description: 'depósito ahorro', date: null },
       ],
       clarification: null,
       noMovements: false,
@@ -18,7 +18,7 @@ describe('parseResultSchema', () => {
   it('acepta categorías nuevas declaradas (catálogo abierto)', () => {
     const parsed = parseResultSchema.parse({
       transactions: [
-        { amount: 200, type: 'gasto', category: 'mascotas', method: 'efectivo', description: 'comida del perro' },
+        { amount: 200, type: 'gasto', category: 'mascotas', method: 'efectivo', description: 'comida del perro', date: null },
       ],
       clarification: null,
       noMovements: false,
@@ -71,7 +71,7 @@ describe('parseResultSchema', () => {
     // categoría fuera del catálogo semilla: VÁLIDA (catálogo dinámico)
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 45, type: 'gasto', category: 'viajes', method: 'efectivo', description: 'x' }],
+        transactions: [{ amount: 45, type: 'gasto', category: 'viajes', method: 'efectivo', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         newCategories: [{ name: 'viajes', emoji: '✈️' }],
@@ -80,7 +80,7 @@ describe('parseResultSchema', () => {
     // type inventado: inválido
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 45, type: 'compra', category: 'comida', method: 'efectivo', description: 'x' }],
+        transactions: [{ amount: 45, type: 'compra', category: 'comida', method: 'efectivo', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         newCategories: [],
@@ -89,7 +89,7 @@ describe('parseResultSchema', () => {
     // method inventado: inválido
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 45, type: 'gasto', category: 'comida', method: 'cheque', description: 'x' }],
+        transactions: [{ amount: 45, type: 'gasto', category: 'comida', method: 'cheque', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         newCategories: [],
@@ -100,7 +100,7 @@ describe('parseResultSchema', () => {
   it('rechaza montos no numéricos', () => {
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 'Q45', type: 'gasto', category: 'comida', method: 'efectivo', description: 'x' }],
+        transactions: [{ amount: 'Q45', type: 'gasto', category: 'comida', method: 'efectivo', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         newCategories: [],

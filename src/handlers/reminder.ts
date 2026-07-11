@@ -1,6 +1,7 @@
 import { config } from '../lib/config';
-import { todayGT } from '../lib/dates';
-import { getDayState } from '../lib/dynamo';
+import { daysAgoGT, todayGT } from '../lib/dates';
+import { getDayState, queryRange } from '../lib/dynamo';
+import { renderWeek } from '../lib/format';
 import { logger } from '../lib/logger';
 import { sendMessage } from '../lib/telegram';
 import type { ScheduleEvent } from '../lib/types';
@@ -13,6 +14,13 @@ const FOLLOWUP_MESSAGE =
 
 export const handler = async (event: ScheduleEvent): Promise<void> => {
   const today = todayGT();
+
+  if (event.kind === 'weekly') {
+    const txns = await queryRange(daysAgoGT(6), today);
+    await sendMessage(config.allowedChatId, `📊 <b>Resumen semanal</b>\n\n${renderWeek(txns)}`);
+    logger.info('resumen semanal enviado', { date: today, txns: txns.length });
+    return;
+  }
 
   if (event.kind === 'followup') {
     const day = await getDayState(today);
