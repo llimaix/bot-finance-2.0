@@ -7,8 +7,11 @@ import {
   QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { SEED_CATEGORY_EMOJI } from './categories';
 import { config } from './config';
-import type { ParsedTransaction, Transaction } from './types';
+import { logger } from './logger';
+import { SEED_CATEGORIES } from './types';
+import type { CategoryRecord, ParsedTransaction, Transaction } from './types';
 
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -71,6 +74,58 @@ export async function getDayState(date: string): Promise<{ reported: boolean }> 
   return { reported: res.Item?.reported === true };
 }
 
+// ── Base de conocimientos de categorías (items CAT#<nombre>) ──────────────
+
+export async function listCategories(): Promise<CategoryRecord[]> {
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: config.tableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'CAT#' },
+    }),
+  );
+  return (res.Items ?? []).map((it) => ({
+    name: it.name as string,
+    emoji: it.emoji as string,
+    source: it.source as CategoryRecord['source'],
+    createdAt: it.createdAt as string,
+  }));
+}
+
+/** Alta idempotente: si la categoría ya existe, no la toca. */
+export async function putCategoryIfAbsent(cat: CategoryRecord): Promise<void> {
+  try {
+    await doc.send(
+      new PutCommand({
+        TableName: config.tableName,
+        Item: { PK, SK: `CAT#${cat.name}`, ...cat },
+        ConditionExpression: 'attribute_not_exists(PK)',
+      }),
+    );
+    logger.info('categoría creada', { category: cat.name, emoji: cat.emoji, source: cat.source });
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return;
+    throw err;
+  }
+}
+
+/** Catálogo vigente; la primera vez siembra las categorías base. */
+export async function getOrSeedCategories(): Promise<CategoryRecord[]> {
+  const existing = await listCategories();
+  if (existing.length > 0) return existing;
+
+  const createdAt = new Date().toISOString();
+  const seeds: CategoryRecord[] = SEED_CATEGORIES.map((name) => ({
+    name,
+    emoji: SEED_CATEGORY_EMOJI[name] ?? '🏷️',
+    source: 'seed',
+    createdAt,
+  }));
+  for (const seed of seeds) await putCategoryIfAbsent(seed);
+  logger.info('base de conocimientos sembrada', { count: seeds.length });
+  return seeds;
+}
+
 // ── Transacciones ──────────────────────────────────────────────────────────
 
 interface TxnItem extends ParsedTransaction {
@@ -80,6 +135,7 @@ interface TxnItem extends ParsedTransaction {
   shortId: number;
   rawMessage: string;
   createdAt: string;
+  emoji?: string;
 }
 
 function toTransaction(item: Record<string, unknown>): Transaction {
@@ -95,6 +151,7 @@ function toTransaction(item: Record<string, unknown>): Transaction {
     description: it.description,
     rawMessage: it.rawMessage,
     createdAt: it.createdAt,
+    ...(it.emoji ? { emoji: it.emoji } : {}),
   };
 }
 
@@ -167,13 +224,16 @@ export async function deleteTransaction(sk: string): Promise<void> {
 }
 
 /** Actualiza solo los campos regenerados por una corrección; conserva SK/shortId/rawMessage/createdAt. */
-export async function updateTransactionFields(sk: string, fields: ParsedTransaction): Promise<void> {
+export async function updateTransactionFields(
+  sk: string,
+  fields: ParsedTransaction & { emoji: string },
+): Promise<void> {
   await doc.send(
     new UpdateCommand({
       TableName: config.tableName,
       Key: { PK, SK: sk },
       UpdateExpression:
-        'SET amount = :amount, #type = :type, category = :category, #method = :method, description = :description',
+        'SET amount = :amount, #type = :type, category = :category, #method = :method, description = :description, emoji = :emoji',
       ExpressionAttributeNames: { '#type': 'type', '#method': 'method' },
       ExpressionAttributeValues: {
         ':amount': fields.amount,
@@ -181,6 +241,7 @@ export async function updateTransactionFields(sk: string, fields: ParsedTransact
         ':category': fields.category,
         ':method': fields.method,
         ':description': fields.description,
+        ':emoji': fields.emoji,
       },
     }),
   );

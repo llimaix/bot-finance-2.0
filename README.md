@@ -30,6 +30,7 @@ EventBridge Scheduler (hora de Guatemala)
 | `/semana` | Resumen de los últimos 7 días por categoría |
 | `/mes` | Resumen del mes en curso |
 | `/reporte` | Reporte completo del mes en curso con análisis de la IA |
+| `/categorias` | Ver la base de conocimientos de categorías |
 | `/borrar N` | Elimina el movimiento #N de hoy |
 | `corrige #N ...` | Corrige un movimiento en lenguaje natural: "corrige #2 eran Q50 con débito" |
 
@@ -121,11 +122,21 @@ scripts/             # set-webhook.mjs (lo corre el workflow en cada deploy)
 .github/workflows/   # deploy.yml (CI + deploy con OIDC)
 ```
 
+## Categorías dinámicas (base de conocimientos) 🏷️
+
+Las categorías **no son un catálogo fijo**: viven en DynamoDB como items `CAT#<nombre>`.
+
+- La primera vez se siembran las 17 categorías base.
+- En **cada parseo** el LLM recibe el catálogo vigente con la regla: usa una existente si razonablemente aplica; **solo si ninguna encaja, crea una nueva** (slug en minúsculas sin tildes, con su emoji) y la declara en el resultado estructurado.
+- El código normaliza (anti-duplicados: "Construcción" → `construccion` existente) y persiste la nueva categoría — queda disponible para siempre y el bot avisa: `🆕 Nueva categoría creada: 🐕 mascotas`.
+- `/categorias` muestra el catálogo completo, marcando las que el bot creó solo.
+
 ## Modelo de datos (DynamoDB single-table `finanzas-personales`)
 
 | Item | PK | SK | Atributos |
 |---|---|---|---|
-| Movimiento | `USER#allan` | `TXN#<yyyy-mm-dd>#<ulid>` | amount, type, category, method, description, rawMessage, shortId, createdAt |
+| Movimiento | `USER#allan` | `TXN#<yyyy-mm-dd>#<ulid>` | amount, type, category, method, description, rawMessage, shortId, emoji, createdAt |
+| Categoría | `USER#allan` | `CAT#<nombre>` | name, emoji, source (`seed`/`auto`), createdAt |
 | Estado del día | `USER#allan` | `DAY#<fecha>` | reported, lastShortId (contador atómico de shortIds) |
 | Dedupe de updates | `USER#allan` | `UPDATE#<update_id>` | ttl (48h) |
 

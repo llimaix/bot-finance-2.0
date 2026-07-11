@@ -26,6 +26,10 @@ describe('matchCommand', () => {
     expect(matchCommand('/nada@MiPistoGTBot')).toEqual({ kind: 'nada' });
   });
 
+  it('/categorias muestra la base de conocimientos', () => {
+    expect(matchCommand('/categorias')).toEqual({ kind: 'categorias' });
+  });
+
   it('start/help/ayuda → ayuda', () => {
     expect(matchCommand('/start')).toEqual({ kind: 'ayuda' });
     expect(matchCommand('/help')).toEqual({ kind: 'ayuda' });

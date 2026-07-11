@@ -1,9 +1,9 @@
 import { narrateReport } from './ai/parse';
 import { computeAggregates } from './aggregates';
 import type { Aggregates } from './aggregates';
-import { CATEGORY_EMOJI, escapeHtml, formatQ } from './format';
+import { emojiForCategory, escapeHtml, formatQ } from './format';
 import { logger } from './logger';
-import type { Category, Transaction } from './types';
+import type { Transaction } from './types';
 
 export interface ReportOptions {
   /** Etiqueta legible del período, p.ej. "junio de 2026" o "julio de 2026 (al día 10)". */
@@ -43,7 +43,7 @@ export async function buildReport(opts: ReportOptions): Promise<string> {
   lines.push('', '<b>Por categoría:</b>');
   const cats = Object.entries(agg.byCategory).sort(([, a], [, b]) => b.sum - a.sum);
   for (const [cat, data] of cats) {
-    lines.push(`${CATEGORY_EMOJI[cat as Category]} ${cat}: ${formatQ(data.sum)} (${data.count})`);
+    lines.push(`${emojiForCategory(cat, opts.txns)} ${cat}: ${formatQ(data.sum)} (${data.count})`);
   }
 
   lines.push('', '<b>Por método de pago:</b>');

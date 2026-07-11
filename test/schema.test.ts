@@ -10,8 +10,21 @@ describe('parseResultSchema', () => {
       ],
       clarification: null,
       noMovements: false,
+      newCategories: [],
     });
     expect(parsed.transactions).toHaveLength(2);
+  });
+
+  it('acepta categorías nuevas declaradas (catálogo abierto)', () => {
+    const parsed = parseResultSchema.parse({
+      transactions: [
+        { amount: 200, type: 'gasto', category: 'mascotas', method: 'efectivo', description: 'comida del perro' },
+      ],
+      clarification: null,
+      noMovements: false,
+      newCategories: [{ name: 'mascotas', emoji: '🐕' }],
+    });
+    expect(parsed.newCategories[0]?.name).toBe('mascotas');
   });
 
   it('acepta "hoy nada" (día sin movimientos explícito)', () => {
@@ -19,6 +32,7 @@ describe('parseResultSchema', () => {
       transactions: [],
       clarification: null,
       noMovements: true,
+      newCategories: [],
     });
     expect(parsed.noMovements).toBe(true);
   });
@@ -28,6 +42,7 @@ describe('parseResultSchema', () => {
       transactions: [],
       clarification: null,
       noMovements: false,
+      newCategories: [],
     });
     expect(parsed.transactions).toHaveLength(0);
     expect(parsed.noMovements).toBe(false);
@@ -38,29 +53,46 @@ describe('parseResultSchema', () => {
       transactions: [],
       clarification: '¿Cuánto costó el repuesto?',
       noMovements: false,
+      newCategories: [],
     });
     expect(parsed.clarification).toContain('repuesto');
   });
 
-  it('exige el campo noMovements', () => {
+  it('exige noMovements y newCategories', () => {
     expect(() =>
-      parseResultSchema.parse({ transactions: [], clarification: null }),
+      parseResultSchema.parse({ transactions: [], clarification: null, newCategories: [] }),
+    ).toThrow();
+    expect(() =>
+      parseResultSchema.parse({ transactions: [], clarification: null, noMovements: false }),
     ).toThrow();
   });
 
-  it('rechaza categorías y tipos fuera del enum', () => {
+  it('la categoría es abierta, pero type y method siguen cerrados', () => {
+    // categoría fuera del catálogo semilla: VÁLIDA (catálogo dinámico)
     expect(() =>
       parseResultSchema.parse({
         transactions: [{ amount: 45, type: 'gasto', category: 'viajes', method: 'efectivo', description: 'x' }],
         clarification: null,
         noMovements: false,
+        newCategories: [{ name: 'viajes', emoji: '✈️' }],
       }),
-    ).toThrow();
+    ).not.toThrow();
+    // type inventado: inválido
     expect(() =>
       parseResultSchema.parse({
         transactions: [{ amount: 45, type: 'compra', category: 'comida', method: 'efectivo', description: 'x' }],
         clarification: null,
         noMovements: false,
+        newCategories: [],
+      }),
+    ).toThrow();
+    // method inventado: inválido
+    expect(() =>
+      parseResultSchema.parse({
+        transactions: [{ amount: 45, type: 'gasto', category: 'comida', method: 'cheque', description: 'x' }],
+        clarification: null,
+        noMovements: false,
+        newCategories: [],
       }),
     ).toThrow();
   });
@@ -71,6 +103,7 @@ describe('parseResultSchema', () => {
         transactions: [{ amount: 'Q45', type: 'gasto', category: 'comida', method: 'efectivo', description: 'x' }],
         clarification: null,
         noMovements: false,
+        newCategories: [],
       }),
     ).toThrow();
   });

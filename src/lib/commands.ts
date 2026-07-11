@@ -4,10 +4,11 @@ export type Command =
   | { kind: 'mes' }
   | { kind: 'reporte' }
   | { kind: 'nada' }
+  | { kind: 'categorias' }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
-const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -26,6 +27,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'reporte' };
     case 'nada':
       return { kind: 'nada' };
+    case 'categorias':
+      return { kind: 'categorias' };
     case 'borrar': {
       const n = Number.parseInt(arg?.replace(/^#/, '') ?? '', 10);
       return { kind: 'borrar', shortId: Number.isInteger(n) && n > 0 ? n : null };
@@ -65,9 +68,12 @@ export const HELP_TEXT = [
   '/mes — resumen del mes en curso',
   '/reporte — reporte completo del mes con análisis',
   '/nada — registrar día sin movimientos',
+  '/categorias — tu base de conocimientos de categorías',
   '/borrar N — elimina el movimiento #N de hoy',
   '',
   'También puedes corregir: "corrige #2 eran Q50"',
+  '',
+  'Las categorías se organizan solas: si un movimiento no encaja en ninguna, el bot crea una nueva automáticamente.',
 ].join('\n');
 
 /** Menú de comandos que se registra en Telegram (setMyCommands) en cada deploy. */
@@ -77,6 +83,7 @@ export const BOT_COMMANDS = [
   { command: 'mes', description: 'Resumen del mes en curso' },
   { command: 'reporte', description: 'Reporte del mes con análisis' },
   { command: 'nada', description: 'Registrar día sin movimientos' },
+  { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },
 ] as const;

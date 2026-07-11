@@ -1,29 +1,21 @@
-import type { Category, Method, Transaction, TxnType } from './types';
+import { DEFAULT_CATEGORY_EMOJI, SEED_CATEGORY_EMOJI } from './categories';
+import type { Method, Transaction, TxnType } from './types';
 
 /** Q1,500.00 — determinista, sin depender de la variante de ICU instalada. */
 export function formatQ(amount: number): string {
   return `Q${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export const CATEGORY_EMOJI: Record<Category, string> = {
-  comida: '🍽️',
-  supermercado: '🛒',
-  transporte: '🚗',
-  hogar: '🏠',
-  herramientas: '🔧',
-  construccion: '🧱',
-  salud: '💊',
-  educacion: '📚',
-  entretenimiento: '🎬',
-  ropa: '👕',
-  regalos: '🎁',
-  servicios: '💡',
-  suscripciones: '📺',
-  ahorro: '🐷',
-  inversion: '📈',
-  deuda: '💳',
-  otros: '📦',
-};
+/** Emoji de un movimiento: el denormalizado al guardar → semilla → genérico. */
+export function emojiFor(txn: Pick<Transaction, 'category' | 'emoji'>): string {
+  return txn.emoji || SEED_CATEGORY_EMOJI[txn.category] || DEFAULT_CATEGORY_EMOJI;
+}
+
+/** Emoji de una categoría en listados agrupados, rescatándolo de los movimientos. */
+export function emojiForCategory(category: string, txns?: ReadonlyArray<Transaction>): string {
+  const fromTxn = txns?.find((t) => t.category === category && t.emoji)?.emoji;
+  return fromTxn || SEED_CATEGORY_EMOJI[category] || DEFAULT_CATEGORY_EMOJI;
+}
 
 const METHOD_LABEL: Record<Method, string> = {
   credito: 'crédito',
@@ -48,7 +40,7 @@ export function escapeHtml(text: string): string {
 
 /** "2. 🍽️ Comida — Q45.00 — efectivo" */
 export function renderTxnLine(txn: Transaction): string {
-  const parts = [`${CATEGORY_EMOJI[txn.category]} ${escapeHtml(prefixed(txn))}`, formatQ(txn.amount)];
+  const parts = [`${emojiFor(txn)} ${escapeHtml(prefixed(txn))}`, formatQ(txn.amount)];
   const method = METHOD_LABEL[txn.method];
   if (method) parts.push(method);
   return `${txn.shortId}. ${parts.join(' — ')}`;

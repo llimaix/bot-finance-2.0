@@ -13,8 +13,8 @@ export interface Aggregates {
   totalGastos: number;
   totalIngresos: number;
   totalAhorro: number;
-  /** Solo gastos, ordenado se deja al renderer. */
-  byCategory: Partial<Record<Category, CategoryAggregate>>;
+  /** Solo gastos, ordenado se deja al renderer. Claves: catálogo dinámico. */
+  byCategory: Record<string, CategoryAggregate>;
   /** Solo gastos. */
   byMethod: Partial<Record<Method, number>>;
   /** Gasto promedio por día del período. */
@@ -38,7 +38,7 @@ export function computeAggregates(
 ): Aggregates {
   const gastos = txns.filter((t) => t.type === 'gasto');
 
-  const byCategory: Partial<Record<Category, CategoryAggregate>> = {};
+  const byCategory: Record<string, CategoryAggregate> = {};
   const byMethod: Partial<Record<Method, number>> = {};
   for (const g of gastos) {
     const cat = (byCategory[g.category] ??= { sum: 0, count: 0 });

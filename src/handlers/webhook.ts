@@ -8,8 +8,10 @@ import { daysAgoGT, daysElapsedInMonthGT, monthLabelES, monthPrefixGT, todayGT }
 import {
   deleteTransaction,
   findByShortId,
+  listCategories,
   markReported,
   markReportedAndReserveShortIds,
+  putCategoryIfAbsent,
   putTransactions,
   queryDay,
   queryMonth,
@@ -17,10 +19,16 @@ import {
   tryClaimUpdate,
   updateTransactionFields,
 } from '../lib/dynamo';
-import { CATEGORY_EMOJI, formatQ, renderConfirmation, renderDay, renderTxnLine, sumSpent } from '../lib/format';
+import {
+  emojiForCategory,
+  escapeHtml,
+  formatQ,
+  renderConfirmation,
+  renderDay,
+  renderTxnLine,
+  sumSpent,
+} from '../lib/format';
 import { computeAggregates } from '../lib/aggregates';
-import type { Category } from '../lib/types';
-import { escapeHtml } from '../lib/format';
 import { logger } from '../lib/logger';
 import { buildReport } from '../lib/report';
 import { getSttProvider } from '../lib/stt';
@@ -130,7 +138,8 @@ async function handleFreeText(
   text: string,
   transcript?: string,
 ): Promise<void> {
-  const { transactions, clarification, noMovements } = await parseTransactions(text);
+  const { transactions, clarification, noMovements, createdCategories, categoryEmoji } =
+    await parseTransactions(text);
 
   // En respuestas de voz, mostrar siempre lo que se escuchó.
   const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
@@ -150,8 +159,13 @@ async function handleFreeText(
     return;
   }
 
-  const shortIds = await markReportedAndReserveShortIds(today, transactions.length);
+  // Persistir primero las categorías nuevas: la base de conocimientos crece sola.
   const createdAt = new Date().toISOString();
+  for (const cat of createdCategories) {
+    await putCategoryIfAbsent({ ...cat, source: 'auto', createdAt });
+  }
+
+  const shortIds = await markReportedAndReserveShortIds(today, transactions.length);
   const txns: Transaction[] = transactions.map((t, i) => ({
     ...t,
     sk: `TXN#${today}#${ulid()}`,
@@ -159,19 +173,21 @@ async function handleFreeText(
     shortId: shortIds[i]!,
     rawMessage: text,
     createdAt,
+    ...(categoryEmoji.has(t.category) ? { emoji: categoryEmoji.get(t.category)! } : {}),
   }));
   await putTransactions(txns);
 
   const todayTxns = await queryDay(today);
-  await sendMessage(
-    chatId,
-    renderConfirmation({
-      txns,
-      totalSpentToday: sumSpent(todayTxns),
-      clarification,
-      ...(transcript ? { transcript } : {}),
-    }),
-  );
+  let reply = renderConfirmation({
+    txns,
+    totalSpentToday: sumSpent(todayTxns),
+    clarification,
+    ...(transcript ? { transcript } : {}),
+  });
+  for (const cat of createdCategories) {
+    reply += `\n🆕 Nueva categoría creada: ${cat.emoji} ${escapeHtml(cat.name)}`;
+  }
+  await sendMessage(chatId, reply);
 }
 
 // ── Comandos ───────────────────────────────────────────────────────────────
@@ -186,6 +202,27 @@ async function handleCommand(chatId: number, today: string, command: Command): P
       // El día ya quedó marcado como reportado en route(); atajo sin pasar por el LLM.
       await sendMessage(chatId, '👍 Anotado: día sin movimientos.');
       return;
+
+    case 'categorias': {
+      const cats = await listCategories();
+      if (cats.length === 0) {
+        await sendMessage(chatId, '🏷️ Aún no hay categorías: se siembran con tu primer movimiento.');
+        return;
+      }
+      const auto = cats.filter((c) => c.source === 'auto');
+      const lines = [
+        `🏷️ <b>Base de conocimientos</b> (${cats.length} categorías):`,
+        '',
+        ...cats
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((c) => `${c.emoji} ${escapeHtml(c.name)}${c.source === 'auto' ? ' · creada por el bot' : ''}`),
+      ];
+      if (auto.length === 0) {
+        lines.push('', 'Cuando un movimiento no encaje en ninguna, crearé una nueva automáticamente.');
+      }
+      await sendMessage(chatId, lines.join('\n'));
+      return;
+    }
 
     case 'hoy': {
       const txns = await queryDay(today);
@@ -251,7 +288,7 @@ function renderWeek(txns: Transaction[]): string {
   const lines = ['📅 <b>Últimos 7 días</b>', '', `💸 Gastos: ${formatQ(agg.totalGastos)}`, `📈 Promedio diario: ${formatQ(agg.dailyAverage)}`, ''];
   const cats = Object.entries(agg.byCategory).sort(([, a], [, b]) => b.sum - a.sum);
   for (const [cat, data] of cats) {
-    lines.push(`${CATEGORY_EMOJI[cat as Category]} ${cat}: ${formatQ(data.sum)} (${data.count})`);
+    lines.push(`${emojiForCategory(cat, txns)} ${cat}: ${formatQ(data.sum)} (${data.count})`);
   }
   return lines.join('\n');
 }
@@ -270,12 +307,16 @@ async function handleCorrection(
     return;
   }
 
-  const corrected = await correctTransaction(original, correctionText);
-  await updateTransactionFields(original.sk, corrected);
+  const { corrected, emoji, createdCategory } = await correctTransaction(original, correctionText);
+  if (createdCategory) {
+    await putCategoryIfAbsent({ ...createdCategory, source: 'auto', createdAt: new Date().toISOString() });
+  }
+  await updateTransactionFields(original.sk, { ...corrected, emoji });
 
-  const after: Transaction = { ...original, ...corrected };
-  await sendMessage(
-    chatId,
-    [`✏️ Corregido #${shortId}:`, `Antes: ${renderTxnLine(original)}`, `Ahora: ${renderTxnLine(after)}`].join('\n'),
-  );
+  const after: Transaction = { ...original, ...corrected, emoji };
+  const lines = [`✏️ Corregido #${shortId}:`, `Antes: ${renderTxnLine(original)}`, `Ahora: ${renderTxnLine(after)}`];
+  if (createdCategory) {
+    lines.push(`🆕 Nueva categoría creada: ${createdCategory.emoji} ${escapeHtml(createdCategory.name)}`);
+  }
+  await sendMessage(chatId, lines.join('\n'));
 }

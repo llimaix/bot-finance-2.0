@@ -60,6 +60,7 @@ const commands = [
   { command: 'mes', description: 'Resumen del mes en curso' },
   { command: 'reporte', description: 'Reporte del mes con análisis' },
   { command: 'nada', description: 'Registrar día sin movimientos' },
+  { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },
 ];

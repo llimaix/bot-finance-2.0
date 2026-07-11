@@ -1,7 +1,12 @@
 export const TXN_TYPES = ['gasto', 'ingreso', 'retiro', 'deposito', 'transferencia'] as const;
 export type TxnType = (typeof TXN_TYPES)[number];
 
-export const CATEGORIES = [
+/**
+ * Categorías SEMILLA: pueblan la base de conocimientos (items CAT# en DynamoDB)
+ * la primera vez. Después el catálogo es dinámico: el LLM crea categorías
+ * nuevas cuando ninguna existente encaja.
+ */
+export const SEED_CATEGORIES = [
   'comida',
   'supermercado',
   'transporte',
@@ -20,7 +25,17 @@ export const CATEGORIES = [
   'deuda',
   'otros',
 ] as const;
-export type Category = (typeof CATEGORIES)[number];
+
+/** Abierta: cualquier slug del catálogo dinámico. */
+export type Category = string;
+
+/** Item CAT#<name> de la base de conocimientos. */
+export interface CategoryRecord {
+  name: string;
+  emoji: string;
+  source: 'seed' | 'auto';
+  createdAt: string;
+}
 
 export const METHODS = ['credito', 'debito', 'efectivo', 'transferencia', 'na'] as const;
 export type Method = (typeof METHODS)[number];
@@ -38,6 +53,8 @@ export interface ParsedTransaction {
 export interface Transaction extends ParsedTransaction {
   /** SK completo: TXN#<yyyy-mm-dd>#<ulid> */
   sk: string;
+  /** Emoji de la categoría, denormalizado al guardar (los items viejos no lo tienen). */
+  emoji?: string;
   /** yyyy-mm-dd (hora de Guatemala) */
   date: string;
   /** Número corto del día, para /borrar y "corrige #N" */
