@@ -19,13 +19,18 @@ export const config = {
   get allowedChatId() {
     return required('ALLOWED_CHAT_ID');
   },
+  // `||` y no `??`: en CI las vars no configuradas llegan como string vacío.
   get llmProvider() {
-    return process.env.LLM_PROVIDER ?? 'anthropic';
+    return process.env.LLM_PROVIDER || 'anthropic';
   },
   get llmModel() {
-    return process.env.LLM_MODEL ?? 'claude-haiku-4-5';
+    return process.env.LLM_MODEL || 'claude-haiku-4-5';
   },
   get sttProvider() {
-    return process.env.STT_PROVIDER ?? 'aws';
+    return process.env.STT_PROVIDER || 'aws';
+  },
+  /** Solo requerida cuando LLM_PROVIDER=minimax. */
+  get minimaxApiKey() {
+    return required('MINIMAX_API_KEY');
   },
 };

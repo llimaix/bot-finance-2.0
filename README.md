@@ -76,23 +76,19 @@ El output `DeployRoleArn` es el ARN del rol que asumirá GitHub Actions.
 
 Cada push a `main` corre typecheck + tests + synth y deploya. El último paso del workflow registra el webhook en Telegram automáticamente (`setWebhook` con el secret token). Mándale un mensaje al bot: *"gasté Q45 en almuerzo en efectivo"*.
 
-## Cambiar de proveedor de IA (sin tocar la lógica)
+## Cambiar de proveedor de IA (sin tocar código)
 
-El único punto de acoplamiento es `src/lib/ai/llm.ts` (LLM) y `src/lib/stt/index.ts` (voz).
+El único punto de acoplamiento es `src/lib/ai/llm.ts` (LLM) y `src/lib/stt/index.ts` (voz). Los proveedores **ya implementados** se alternan solo con configuración del environment `production` de GitHub:
 
-**Ejemplo — pasar a OpenAI:**
+**Pasar a MiniMax (ya soportado):**
 
-```bash
-pnpm add @ai-sdk/openai
-```
+1. Secret nuevo: `MINIMAX_API_KEY` (key de [platform.minimax.io](https://platform.minimax.io)).
+2. Variables del environment: `LLM_PROVIDER=minimax`, `LLM_MODEL=MiniMax-M2`.
+3. Relanza el workflow (o push a `main`). Para volver a Claude, borra/cambia las variables.
 
-```ts
-// src/lib/ai/llm.ts
-case 'openai':
-  return createOpenAI()(config.llmModel);
-```
+**Agregar otro proveedor** (OpenAI, Google, DeepSeek/Kimi vía openai-compatible): un case nuevo en `src/lib/ai/llm.ts` siguiendo el patrón de `minimax`, su secret en GitHub y su línea en el workflow. La lógica de negocio no cambia: el schema zod valida la salida venga de donde venga.
 
-Y en el environment de GitHub: secret `OPENAI_API_KEY`, variables `LLM_PROVIDER=openai`, `LLM_MODEL=gpt-...` (pásalas al deploy como env en el workflow, igual que las demás). MiniMax/DeepSeek/otros compatibles con OpenAI: `@ai-sdk/openai-compatible` con `baseURL`.
+> 💰 Referencia de costos para el volumen de este bot (~100K tokens entrada + 30K salida/mes): Claude Haiku 4.5 ≈ Q2/mes; MiniMax M2 ≈ Q0.50/mes. Transcribe (voz) cuesta más que cualquiera de los dos.
 
 ## Desarrollo local
 

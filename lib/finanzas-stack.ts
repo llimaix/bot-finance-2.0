@@ -36,6 +36,7 @@ export class FinanzasStack extends Stack {
       TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ?? '',
       TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? '',
+      MINIMAX_API_KEY: process.env.MINIMAX_API_KEY ?? '',
       ALLOWED_CHAT_ID: process.env.ALLOWED_CHAT_ID ?? '',
     };
 
@@ -43,10 +44,11 @@ export class FinanzasStack extends Stack {
       TABLE_NAME: table.tableName,
       TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN,
       ALLOWED_CHAT_ID: secrets.ALLOWED_CHAT_ID,
-      // Proveedores intercambiables: cambiar de LLM/STT es cambiar estas vars.
-      LLM_PROVIDER: process.env.LLM_PROVIDER ?? 'anthropic',
-      LLM_MODEL: process.env.LLM_MODEL ?? 'claude-haiku-4-5',
-      STT_PROVIDER: process.env.STT_PROVIDER ?? 'aws',
+      // Proveedores intercambiables: cambiar de LLM/STT es cambiar estas vars
+      // (en CI vienen del environment de GitHub; vacías → default con ||).
+      LLM_PROVIDER: process.env.LLM_PROVIDER || 'anthropic',
+      LLM_MODEL: process.env.LLM_MODEL || 'claude-haiku-4-5',
+      STT_PROVIDER: process.env.STT_PROVIDER || 'aws',
     };
 
     const fn = (name: string, entry: string, opts: { timeout: Duration; env?: Record<string, string> }) =>
@@ -78,6 +80,7 @@ export class FinanzasStack extends Stack {
       env: {
         TELEGRAM_WEBHOOK_SECRET: secrets.TELEGRAM_WEBHOOK_SECRET,
         ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY,
+        MINIMAX_API_KEY: secrets.MINIMAX_API_KEY,
       },
     });
 
@@ -87,7 +90,10 @@ export class FinanzasStack extends Stack {
 
     const monthlyFn = fn('MonthlyReportFn', 'src/handlers/monthly-report.ts', {
       timeout: Duration.seconds(120),
-      env: { ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY },
+      env: {
+        ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY,
+        MINIMAX_API_KEY: secrets.MINIMAX_API_KEY,
+      },
     });
 
     // ── Permisos mínimos ───────────────────────────────────────────────────

@@ -64,7 +64,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Solo hace falta si LLM_PROVIDER=minimax (vacío no estorba)
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           ALLOWED_CHAT_ID: ${{ secrets.ALLOWED_CHAT_ID }}
+          # Variables (no secrets) del environment: cambiar de proveedor de IA
+          # es editarlas en GitHub y relanzar el workflow — sin tocar código.
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          STT_PROVIDER: ${{ vars.STT_PROVIDER }}
 
       - name: Registrar webhook de Telegram
         run: node scripts/set-webhook.mjs

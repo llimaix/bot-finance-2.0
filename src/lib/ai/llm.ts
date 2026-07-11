@@ -1,31 +1,40 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import { config } from '../config';
 
 /**
  * Punto único de acoplamiento con el proveedor de LLM.
  *
- * Cambiar de proveedor NO toca la lógica de negocio: se instala el paquete del
- * provider y se cambian las env vars LLM_PROVIDER / LLM_MODEL (+ la API key
- * del proveedor). Ejemplos:
+ * Cambiar de proveedor NO toca la lógica de negocio: solo env vars (en el
+ * environment `production` de GitHub) y, si es un proveedor nuevo, su case aquí.
  *
- *   OpenAI:            pnpm add @ai-sdk/openai
- *     case 'openai':   return createOpenAI()(config.llmModel);
+ *   Anthropic (default):  LLM_PROVIDER=anthropic  LLM_MODEL=claude-haiku-4-5
+ *                         + secret ANTHROPIC_API_KEY
  *
- *   MiniMax / DeepSeek / cualquier API compatible con OpenAI:
- *                      pnpm add @ai-sdk/openai-compatible
- *     case 'minimax':  return createOpenAICompatible({ name: 'minimax',
- *                        baseURL: 'https://api.minimax.io/v1',
- *                        apiKey: process.env.MINIMAX_API_KEY })(config.llmModel);
+ *   MiniMax:              LLM_PROVIDER=minimax    LLM_MODEL=MiniMax-M2
+ *                         + secret MINIMAX_API_KEY
  *
- *   Google:            pnpm add @ai-sdk/google
- *     case 'google':   return createGoogleGenerativeAI()(config.llmModel);
+ *   Otros compatibles con OpenAI (DeepSeek, Kimi, etc.): copiar el case de
+ *   minimax cambiando name/baseURL/env de la key.
+ *
+ *   OpenAI nativo:        pnpm add @ai-sdk/openai
+ *     case 'openai':      return createOpenAI()(config.llmModel);
  */
 export function getModel(): LanguageModel {
   switch (config.llmProvider) {
     case 'anthropic':
       // Lee ANTHROPIC_API_KEY del entorno por sí solo.
       return createAnthropic()(config.llmModel);
+
+    case 'minimax':
+      return createOpenAICompatible({
+        name: 'minimax',
+        // Endpoint internacional compatible con OpenAI (https://platform.minimax.io)
+        baseURL: 'https://api.minimax.io/v1',
+        apiKey: config.minimaxApiKey,
+      })(config.llmModel);
+
     default:
       throw new Error(
         `LLM_PROVIDER no soportado: "${config.llmProvider}". Agrega su case en src/lib/ai/llm.ts`,
