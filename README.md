@@ -131,6 +131,24 @@ scripts/             # set-webhook.mjs (lo corre el workflow en cada deploy)
 
 Consultas por prefijo de SK (`begins_with(SK, "TXN#2026-07")`) — sin GSI.
 
+## Guardas de costos 💸
+
+El stack incluye un presupuesto mensual de **$10 USD** sobre toda la cuenta (AWS Budgets):
+
+| Umbral | Acción |
+|---|---|
+| $5 (50%) | Correo de aviso |
+| $8 (80%) | Correo de alerta temprana |
+| $10 (100%) | Correo + **kill switch automático**: se adjunta una política DENY-all a los roles de las 3 Lambdas y el bot deja de operar |
+
+- El correo de alertas es `asanchezrixtun@gmail.com` (cambiable con la variable `BILLING_ALERT_EMAIL` del environment).
+- ⚠️ La facturación de AWS se actualiza con **horas de retraso** — el corte no es en tiempo real. A la escala de este stack el exceso posible es de centavos, pero AWS no ofrece un tope duro instantáneo.
+- El gasto de la **API de Anthropic no pasa por AWS**: su tope natural es el crédito prepagado que cargaste en console.anthropic.com (al agotarse, simplemente deja de responder).
+
+**Para re-armar el bot después del kill switch** (nuevo ciclo de facturación o falsa alarma):
+1. IAM → Roles → busca los 3 roles `FinanzasStack-*Fn*` → pestaña Permissions → **detach** de la política `KillSwitchPolicy`.
+2. Billing → Budgets → `finanzas-web-mensual` → Actions → **Reset** la acción para que quede armada de nuevo.
+
 ## Notas de seguridad
 
 - Webhook protegido con `X-Telegram-Bot-Api-Secret-Token`; cualquier `chat_id` distinto al tuyo se ignora.

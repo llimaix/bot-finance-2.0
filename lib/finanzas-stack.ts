@@ -6,6 +6,7 @@ import {
   TimeZone,
   aws_apigatewayv2 as apigwv2,
   aws_apigatewayv2_integrations as integrations,
+  aws_budgets as budgets,
   aws_dynamodb as dynamodb,
   aws_iam as iam,
   aws_lambda as lambda,
@@ -146,6 +147,75 @@ export class FinanzasStack extends Stack {
       }),
       description: 'Reporte mensual día 1, 08:00 GT',
     });
+
+    // ── Guardas de costos ──────────────────────────────────────────────────
+    // Presupuesto mensual de $10 sobre TODA la cuenta:
+    //   $5 (50%)  → correo de aviso
+    //   $8 (80%)  → correo de alerta temprana
+    //   $10 (100%)→ correo + KILL SWITCH: se adjunta una política DENY-all a los
+    //               roles de las 3 Lambdas, con lo que el bot deja de operar.
+    // Nota: los datos de facturación de AWS se actualizan con horas de retraso
+    // (no es un corte en tiempo real), pero a la escala de este stack el exceso
+    // posible es de centavos.
+    const alertEmail = process.env.BILLING_ALERT_EMAIL || 'asanchezrixtun@gmail.com';
+    const budgetName = 'finanzas-web-mensual';
+    const emailSubscriber = { subscriptionType: 'EMAIL', address: alertEmail };
+
+    const monthlyBudget = new budgets.CfnBudget(this, 'MonthlyBudget', {
+      budget: {
+        budgetName,
+        budgetType: 'COST',
+        timeUnit: 'MONTHLY',
+        budgetLimit: { amount: 10, unit: 'USD' },
+      },
+      notificationsWithSubscribers: [50, 80, 100].map((threshold) => ({
+        notification: {
+          notificationType: 'ACTUAL',
+          comparisonOperator: 'GREATER_THAN',
+          threshold,
+          thresholdType: 'PERCENTAGE',
+        },
+        subscribers: [emailSubscriber],
+      })),
+    });
+
+    const killSwitchPolicy = new iam.ManagedPolicy(this, 'KillSwitchPolicy', {
+      description:
+        'Adjuntada automáticamente por el budget action al superar $10/mes: deniega todo a las Lambdas del bot',
+      statements: [
+        new iam.PolicyStatement({ effect: iam.Effect.DENY, actions: ['*'], resources: ['*'] }),
+      ],
+    });
+
+    const lambdaRoles = [webhookFn, reminderFn, monthlyFn].map((f) => f.role!);
+
+    const budgetActionRole = new iam.Role(this, 'BudgetActionRole', {
+      assumedBy: new iam.ServicePrincipal('budgets.amazonaws.com'),
+      description: 'Lo asume AWS Budgets para aplicar/retirar el kill switch',
+    });
+    budgetActionRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['iam:AttachRolePolicy', 'iam:DetachRolePolicy'],
+        resources: lambdaRoles.map((r) => r.roleArn),
+      }),
+    );
+
+    const killSwitch = new budgets.CfnBudgetsAction(this, 'KillSwitchAction', {
+      budgetName,
+      actionType: 'APPLY_IAM_POLICY',
+      actionThreshold: { type: 'ABSOLUTE_VALUE', value: 10 },
+      notificationType: 'ACTUAL',
+      approvalModel: 'AUTOMATIC',
+      executionRoleArn: budgetActionRole.roleArn,
+      definition: {
+        iamActionDefinition: {
+          policyArn: killSwitchPolicy.managedPolicyArn,
+          roles: lambdaRoles.map((r) => r.roleName),
+        },
+      },
+      subscribers: [{ type: 'EMAIL', address: alertEmail }],
+    });
+    killSwitch.node.addDependency(monthlyBudget);
 
     new CfnOutput(this, 'WebhookUrl', {
       value: `${httpApi.apiEndpoint}/webhook`,
