@@ -32,6 +32,9 @@ export const parseResultSchema = z.object({
   // Distingue "hoy no hubo movimientos" (explícito) de un mensaje que
   // simplemente no habla de dinero (saludo, pregunta, etc.).
   noMovements: z.boolean(),
+  // Si el mensaje es una PREGUNTA sobre sus finanzas (saldos, gastos, etc.),
+  // aquí va la pregunta; el webhook la responde con datos precalculados.
+  question: z.string().nullable(),
   // Categorías que el modelo inventó para este mensaje (vacío normalmente).
   newCategories: z.array(newCategorySchema),
 });

@@ -30,6 +30,22 @@ describe('matchCommand', () => {
     expect(matchCommand('/categorias')).toEqual({ kind: 'categorias' });
   });
 
+  it('/saldo: ver, ajustar y argumentos inválidos', () => {
+    expect(matchCommand('/saldo')).toEqual({ kind: 'saldo', set: null, invalidArgs: false });
+    expect(matchCommand('/saldo efectivo 350')).toEqual({
+      kind: 'saldo',
+      set: { account: 'efectivo', amount: 350 },
+      invalidArgs: false,
+    });
+    expect(matchCommand('/saldo tarjeta -4,092.86')).toEqual({
+      kind: 'saldo',
+      set: { account: 'tarjeta', amount: -4092.86 },
+      invalidArgs: false,
+    });
+    expect(matchCommand('/saldo bitcoin 100')).toEqual({ kind: 'saldo', set: null, invalidArgs: true });
+    expect(matchCommand('/saldo efectivo abc')).toEqual({ kind: 'saldo', set: null, invalidArgs: true });
+  });
+
   it('start/help/ayuda → ayuda', () => {
     expect(matchCommand('/start')).toEqual({ kind: 'ayuda' });
     expect(matchCommand('/help')).toEqual({ kind: 'ayuda' });

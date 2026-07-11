@@ -10,6 +10,7 @@ describe('parseResultSchema', () => {
       ],
       clarification: null,
       noMovements: false,
+      question: null,
       newCategories: [],
     });
     expect(parsed.transactions).toHaveLength(2);
@@ -22,6 +23,7 @@ describe('parseResultSchema', () => {
       ],
       clarification: null,
       noMovements: false,
+      question: null,
       newCategories: [{ name: 'mascotas', emoji: '🐕' }],
     });
     expect(parsed.newCategories[0]?.name).toBe('mascotas');
@@ -32,6 +34,7 @@ describe('parseResultSchema', () => {
       transactions: [],
       clarification: null,
       noMovements: true,
+      question: null,
       newCategories: [],
     });
     expect(parsed.noMovements).toBe(true);
@@ -42,6 +45,7 @@ describe('parseResultSchema', () => {
       transactions: [],
       clarification: null,
       noMovements: false,
+      question: null,
       newCategories: [],
     });
     expect(parsed.transactions).toHaveLength(0);
@@ -53,6 +57,7 @@ describe('parseResultSchema', () => {
       transactions: [],
       clarification: '¿Cuánto costó el repuesto?',
       noMovements: false,
+      question: null,
       newCategories: [],
     });
     expect(parsed.clarification).toContain('repuesto');
@@ -74,6 +79,7 @@ describe('parseResultSchema', () => {
         transactions: [{ amount: 45, type: 'gasto', category: 'viajes', method: 'efectivo', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
+        question: null,
         newCategories: [{ name: 'viajes', emoji: '✈️' }],
       }),
     ).not.toThrow();

@@ -34,6 +34,8 @@ EventBridge Scheduler (hora de Guatemala)
 | `/semana` | Resumen de los últimos 7 días por categoría |
 | `/mes` | Resumen del mes en curso |
 | `/reporte` | Reporte completo del mes en curso con análisis de la IA |
+| ❓ (pregunta libre) | "¿Cuánto tengo?", "¿cuánto llevo en comida?", "¿me alcanza para una Play 5?" — responde y **asesora** con tus saldos, recurrentes y agregados (calculados en código; el LLM solo narra el veredicto) |
+| `/saldo` | Saldos por cuenta (banco, tarjeta, efectivo, kash) + neto líquido. Ajusta semillas: `/saldo efectivo 350` |
 | `/categorias` | Ver la base de conocimientos de categorías |
 | `/borrar N` | Elimina el movimiento #N de hoy (o usa el botón 🗑️ bajo cada confirmación) |
 | `corrige #N ...` | Corrige un movimiento en lenguaje natural: "corrige #2 eran Q50 con débito" |
@@ -142,6 +144,7 @@ Las categorías **no son un catálogo fijo**: viven en DynamoDB como items `CAT#
 | Item | PK | SK | Atributos |
 |---|---|---|---|
 | Movimiento | `USER#allan` | `TXN#<yyyy-mm-dd>#<ulid>` | amount, type, category, method, description, rawMessage, shortId, emoji, createdAt |
+| Cuenta (saldos) | `USER#allan` | `ACC#<id>` | name, emoji, seedBalance, asOf, estimated — el saldo actual se calcula en lectura: semilla + deltas de movimientos posteriores a asOf (sin drift) |
 | Categoría | `USER#allan` | `CAT#<nombre>` | name, emoji, source (`seed`/`auto`), createdAt |
 | Estado del día | `USER#allan` | `DAY#<fecha>` | reported, lastShortId (contador atómico de shortIds) |
 | Dedupe de updates | `USER#allan` | `UPDATE#<update_id>` | ttl (48h) |

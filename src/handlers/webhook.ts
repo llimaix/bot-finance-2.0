@@ -1,18 +1,23 @@
 import { ulid } from 'ulid';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { correctTransaction, parseReceipt, parseTransactions } from '../lib/ai/parse';
+import { answerQuestion, correctTransaction, parseReceipt, parseTransactions } from '../lib/ai/parse';
 import type { ParseOutcome } from '../lib/ai/parse';
+import { DEFAULT_ACCOUNTS, computeBalances, renderSaldos } from '../lib/accounts';
+import { computeAggregates } from '../lib/aggregates';
+import { detectRecurring } from '../lib/recurring';
 import { HELP_TEXT, matchCommand, matchCorrection } from '../lib/commands';
 import type { Command } from '../lib/commands';
 import { config } from '../lib/config';
-import { daysAgoGT, daysElapsedInMonthGT, monthLabelES, monthPrefixGT, todayGT } from '../lib/dates';
+import { daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from '../lib/dates';
 import {
   deleteTransaction,
   findByShortId,
+  getOrSeedAccounts,
   getTransaction,
   listCategories,
   markReported,
   markReportedAndReserveShortIds,
+  putAccount,
   putCategoryIfAbsent,
   putTransactions,
   queryDay,
@@ -23,6 +28,7 @@ import {
 } from '../lib/dynamo';
 import {
   escapeHtml,
+  formatQ,
   renderConfirmation,
   renderDay,
   renderTxnLine,
@@ -169,12 +175,17 @@ async function saveAndConfirm(
   rawMessage: string,
   opts: { transcript?: string; header?: string; emptyReply?: string },
 ): Promise<void> {
-  const { transactions, clarification, noMovements, createdCategories, categoryEmoji } = outcome;
+  const { transactions, clarification, noMovements, question, createdCategories, categoryEmoji } = outcome;
 
   // En respuestas de voz, mostrar siempre lo que se escuchó.
   const heard = opts.transcript ? `🎙️ Escuché: "${escapeHtml(opts.transcript)}"\n\n` : '';
 
   if (transactions.length === 0) {
+    if (question) {
+      const answer = await answerQuestion(question, await buildSnapshot(today));
+      await sendMessage(chatId, `${heard}${escapeHtml(answer)}`);
+      return;
+    }
     if (clarification) {
       await sendMessage(chatId, `${heard}❓ ${escapeHtml(clarification)}`);
     } else if (noMovements) {
@@ -243,6 +254,76 @@ function deleteKeyboard(txns: Transaction[]): InlineKeyboardButton[][] {
   return rows;
 }
 
+// ── Saldos y snapshot para preguntas ───────────────────────────────────────
+
+async function loadBalances(today: string) {
+  const accounts = await getOrSeedAccounts(today);
+  const minAsOf = accounts.reduce((min, a) => (a.asOf < min ? a.asOf : min), today);
+  // computeBalances filtra por cuenta (solo movimientos con fecha > su asOf)
+  const txns = await queryRange(minAsOf, today);
+  return computeBalances(accounts, txns);
+}
+
+function summarizePeriod(label: string, txns: Transaction[], days: number) {
+  const agg = computeAggregates(txns, days);
+  return {
+    periodo: label,
+    totalGastos: agg.totalGastos,
+    totalIngresos: agg.totalIngresos,
+    promedioDiarioGasto: agg.dailyAverage,
+    topCategorias: Object.entries(agg.byCategory)
+      .sort(([, a], [, b]) => b.sum - a.sum)
+      .slice(0, 5)
+      .map(([categoria, d]) => ({ categoria, total: d.sum })),
+    gastosHormiga: agg.hormiga,
+  };
+}
+
+/** Datos precalculados para responder/asesorar: el LLM solo narra sobre esto. */
+async function buildSnapshot(today: string) {
+  const month = monthPrefixGT(0);
+  const prevMonth = monthPrefixGT(-1);
+  const [balances, monthTxns, prevTxns, prev2Txns, weekTxns] = await Promise.all([
+    loadBalances(today),
+    queryMonth(month),
+    queryMonth(prevMonth),
+    queryMonth(monthPrefixGT(-2)),
+    queryRange(daysAgoGT(6), today),
+  ]);
+  const netoLiquido = Math.round(balances.reduce((acc, b) => acc + b.balance, 0) * 100) / 100;
+
+  // Recurrentes detectados sobre ~3 meses de historia (top 12 por monto)
+  const recurring = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns]).slice(0, 12);
+  const paidThisMonth = new Set(
+    recurring
+      .filter((r) => monthTxns.some((t) => t.type === 'gasto' && t.description === r.descripcion))
+      .map((r) => r.descripcion),
+  );
+
+  return {
+    fecha: today,
+    saldos: balances.map((b) => ({
+      cuenta: b.name,
+      id: b.id,
+      saldo: b.balance,
+      alCorteDe: b.asOf,
+      estimado: b.estimated,
+    })),
+    netoLiquido,
+    pagosRecurrentesDetectados: recurring.map((r) => ({
+      ...r,
+      yaPagadoEsteMes: paidThisMonth.has(r.descripcion),
+    })),
+    mesActual: summarizePeriod(
+      `${monthLabelES(month)} (al día ${daysElapsedInMonthGT()})`,
+      monthTxns,
+      daysElapsedInMonthGT(),
+    ),
+    mesAnterior: summarizePeriod(monthLabelES(prevMonth), prevTxns, daysInMonth(prevMonth)),
+    ultimos7Dias: summarizePeriod('últimos 7 días', weekTxns, 7),
+  };
+}
+
 // ── Botones inline ─────────────────────────────────────────────────────────
 
 async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
@@ -297,6 +378,39 @@ async function handleCommand(chatId: number, today: string, command: Command): P
         lines.push('', 'Cuando un movimiento no encaje en ninguna, crearé una nueva automáticamente.');
       }
       await sendMessage(chatId, lines.join('\n'));
+      return;
+    }
+
+    case 'saldo': {
+      if (command.invalidArgs) {
+        await sendMessage(
+          chatId,
+          'Uso: /saldo — ver saldos, o /saldo <cuenta> <monto> para ajustar la semilla.\nCuentas: banco, tarjeta, efectivo, kash. Ej: /saldo efectivo 350',
+        );
+        return;
+      }
+      if (command.set) {
+        const accounts = await getOrSeedAccounts(today);
+        const base =
+          accounts.find((a) => a.id === command.set!.account) ??
+          ({ ...DEFAULT_ACCOUNTS.find((d) => d.id === command.set!.account)!, seedBalance: 0, asOf: today, estimated: true, updatedAt: '' });
+        let amount = command.set.amount;
+        let note = '';
+        if (command.set.account === 'tarjeta' && amount > 0) {
+          amount = -amount;
+          note = ' (interpretado como deuda: guardado en negativo)';
+        }
+        await putAccount({
+          ...base,
+          seedBalance: amount,
+          asOf: today,
+          estimated: false,
+          updatedAt: new Date().toISOString(),
+        });
+        await sendMessage(chatId, `✅ ${base.emoji} ${base.name}: ${formatQ(amount)} al cierre de hoy${note}`);
+      }
+      const balances = await loadBalances(today);
+      await sendMessage(chatId, renderSaldos(balances));
       return;
     }
 

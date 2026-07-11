@@ -72,6 +72,30 @@ export interface ParseResult {
   noMovements: boolean;
 }
 
+// ── Cuentas (modelo de saldos) ─────────────────────────────────────────────
+
+export const ACCOUNT_IDS = ['banco', 'tarjeta', 'efectivo', 'kash'] as const;
+export type AccountId = (typeof ACCOUNT_IDS)[number];
+
+/**
+ * Item ACC#<id>: posición de una cuenta. El saldo NO se muta con cada
+ * movimiento: se guarda una semilla con fecha de corte (asOf) y el saldo
+ * actual se calcula en lectura como semilla + deltas de los movimientos
+ * con fecha POSTERIOR a asOf — sin drift, autocorregible.
+ */
+export interface Account {
+  id: AccountId;
+  name: string;
+  emoji: string;
+  /** Saldo al cierre de asOf. Para la tarjeta, la deuda va en negativo. */
+  seedBalance: number;
+  /** yyyy-mm-dd del corte de la semilla. */
+  asOf: string;
+  /** true cuando la semilla es un estimado (efectivo/kash sin dato real). */
+  estimated: boolean;
+  updatedAt: string;
+}
+
 export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly';
 
 export interface ScheduleEvent {

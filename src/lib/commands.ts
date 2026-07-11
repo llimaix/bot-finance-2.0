@@ -1,3 +1,6 @@
+import { ACCOUNT_IDS } from './types';
+import type { AccountId } from './types';
+
 export type Command =
   | { kind: 'hoy' }
   | { kind: 'semana' }
@@ -6,10 +9,11 @@ export type Command =
   | { kind: 'nada' }
   | { kind: 'categorias' }
   | { kind: 'export' }
+  | { kind: 'saldo'; set: { account: AccountId; amount: number } | null; invalidArgs: boolean }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
-const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|export|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -32,6 +36,16 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'categorias' };
     case 'export':
       return { kind: 'export' };
+    case 'saldo': {
+      if (!arg) return { kind: 'saldo', set: null, invalidArgs: false };
+      const m2 = arg.match(/^(\S+)\s+(-?[\d,]+(?:\.\d+)?)$/);
+      const account = m2?.[1]?.toLowerCase();
+      const amount = m2 ? Number.parseFloat(m2[2]!.replaceAll(',', '')) : Number.NaN;
+      if (!account || !(ACCOUNT_IDS as readonly string[]).includes(account) || !Number.isFinite(amount)) {
+        return { kind: 'saldo', set: null, invalidArgs: true };
+      }
+      return { kind: 'saldo', set: { account: account as AccountId, amount }, invalidArgs: false };
+    }
     case 'borrar': {
       const n = Number.parseInt(arg?.replace(/^#/, '') ?? '', 10);
       return { kind: 'borrar', shortId: Number.isInteger(n) && n > 0 ? n : null };
@@ -72,10 +86,11 @@ export const HELP_TEXT = [
   '/reporte — reporte completo del mes con análisis',
   '/nada — registrar día sin movimientos',
   '/categorias — tu base de conocimientos de categorías',
+  '/saldo — cuánto tienes en cada cuenta (ajusta con: /saldo efectivo 350)',
   '/export — el mes en curso como archivo CSV',
   '/borrar N — elimina el movimiento #N de hoy',
   '',
-  'También puedes: mandar la 📸 foto de un ticket (con caption opcional), decir "ayer gasté..." para fechas pasadas, y corregir con "corrige #2 eran Q50".',
+  'También puedes: mandar la 📸 foto de un ticket (con caption opcional), decir "ayer gasté..." para fechas pasadas, PREGUNTAR ("¿cuánto tengo?", "¿cuánto llevo en comida?") y corregir con "corrige #2 eran Q50".',
   '',
   'Las categorías se organizan solas: si un movimiento no encaja en ninguna, el bot crea una nueva automáticamente.',
 ].join('\n');
@@ -88,6 +103,7 @@ export const BOT_COMMANDS = [
   { command: 'reporte', description: 'Reporte del mes con análisis' },
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
+  { command: 'saldo', description: 'Saldos de tus cuentas' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },

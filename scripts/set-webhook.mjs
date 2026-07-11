@@ -62,6 +62,7 @@ const commands = [
   { command: 'reporte', description: 'Reporte del mes con análisis' },
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
+  { command: 'saldo', description: 'Saldos de tus cuentas' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },

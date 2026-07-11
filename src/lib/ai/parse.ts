@@ -7,6 +7,7 @@ import { logger } from '../logger';
 import type { CategoryRecord, ParsedTransaction, Transaction } from '../types';
 import { getModel } from './llm';
 import {
+  ANSWER_SYSTEM_PROMPT,
   NARRATE_SYSTEM_PROMPT,
   buildCorrectSystemPrompt,
   buildParseSystemPrompt,
@@ -30,6 +31,8 @@ export interface ParseOutcome {
   transactions: DatedTransaction[];
   clarification: string | null;
   noMovements: boolean;
+  /** Pregunta financiera detectada ("¿cuánto tengo?"); el webhook la responde con datos. */
+  question: string | null;
   /** Categorías que no existían y hay que persistir en la base de conocimientos. */
   createdCategories: Array<{ name: string; emoji: string }>;
   /** Mapa nombre→emoji del catálogo (incluidas las recién creadas), para denormalizar. */
@@ -72,6 +75,7 @@ function toOutcome(
     transactions,
     clarification: raw.clarification,
     noMovements: raw.noMovements,
+    question: raw.question,
     createdCategories,
     categoryEmoji,
   };
@@ -186,6 +190,19 @@ export async function correctTransaction(
     emoji,
     ...(resolved.created ? { createdCategory: resolved.created } : {}),
   };
+}
+
+/** Responde una pregunta financiera usando ÚNICAMENTE el snapshot precalculado. */
+export async function answerQuestion(question: string, snapshot: unknown): Promise<string> {
+  const result = await generateText({
+    model: getModel(),
+    system: ANSWER_SYSTEM_PROMPT,
+    prompt: `Pregunta: ${question}\n\nSnapshot: ${JSON.stringify(snapshot)}`,
+    temperature: 0,
+    timeout: LLM_TIMEOUT_MS,
+    maxOutputTokens: 400,
+  });
+  return result.text.trim();
 }
 
 /** Redacta el análisis del reporte a partir de agregados YA calculados en código. */

@@ -7,11 +7,12 @@ import {
   QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { DEFAULT_ACCOUNTS } from './accounts';
 import { SEED_CATEGORY_EMOJI } from './categories';
 import { config } from './config';
 import { logger } from './logger';
 import { SEED_CATEGORIES } from './types';
-import type { CategoryRecord, ParsedTransaction, Transaction } from './types';
+import type { Account, CategoryRecord, ParsedTransaction, Transaction } from './types';
 
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -123,6 +124,54 @@ export async function getOrSeedCategories(): Promise<CategoryRecord[]> {
   }));
   for (const seed of seeds) await putCategoryIfAbsent(seed);
   logger.info('base de conocimientos sembrada', { count: seeds.length });
+  return seeds;
+}
+
+// ── Cuentas (modelo de saldos, items ACC#<id>) ─────────────────────────────
+
+export async function listAccounts(): Promise<Account[]> {
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: config.tableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'ACC#' },
+    }),
+  );
+  return (res.Items ?? []).map((it) => ({
+    id: it.id as Account['id'],
+    name: it.name as string,
+    emoji: it.emoji as string,
+    seedBalance: it.seedBalance as number,
+    asOf: it.asOf as string,
+    estimated: it.estimated === true,
+    updatedAt: it.updatedAt as string,
+  }));
+}
+
+export async function putAccount(account: Account): Promise<void> {
+  await doc.send(
+    new PutCommand({
+      TableName: config.tableName,
+      Item: { PK, SK: `ACC#${account.id}`, ...account },
+    }),
+  );
+  logger.info('cuenta actualizada', { id: account.id, seedBalance: account.seedBalance, asOf: account.asOf });
+}
+
+/** Cuentas actuales; la primera vez las crea en cero (estimadas) con asOf de hoy. */
+export async function getOrSeedAccounts(today: string): Promise<Account[]> {
+  const existing = await listAccounts();
+  if (existing.length > 0) return existing;
+
+  const updatedAt = new Date().toISOString();
+  const seeds: Account[] = DEFAULT_ACCOUNTS.map((acc) => ({
+    ...acc,
+    seedBalance: 0,
+    asOf: today,
+    estimated: true,
+    updatedAt,
+  }));
+  for (const seed of seeds) await putAccount(seed);
   return seeds;
 }
 
