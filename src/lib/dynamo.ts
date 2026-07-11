@@ -12,7 +12,7 @@ import { SEED_CATEGORY_EMOJI } from './categories';
 import { config } from './config';
 import { logger } from './logger';
 import { SEED_CATEGORIES } from './types';
-import type { Account, CategoryRecord, ParsedTransaction, Transaction } from './types';
+import type { Account, CategoryRecord, ParsedTransaction, RecurringRecord, Transaction } from './types';
 
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -125,6 +125,39 @@ export async function getOrSeedCategories(): Promise<CategoryRecord[]> {
   for (const seed of seeds) await putCategoryIfAbsent(seed);
   logger.info('base de conocimientos sembrada', { count: seeds.length });
   return seeds;
+}
+
+// ── Recurrentes aprendidos (items REC#<slug>) ──────────────────────────────
+
+export async function listRecurring(): Promise<RecurringRecord[]> {
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: config.tableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'REC#' },
+    }),
+  );
+  return (res.Items ?? []).map((it) => ({
+    slug: it.slug as string,
+    descripcion: it.descripcion as string,
+    categoria: it.categoria as string,
+    montoTipico: it.montoTipico as number,
+    diaTipico: it.diaTipico as number,
+    status: it.status as RecurringRecord['status'],
+    source: it.source as RecurringRecord['source'],
+    createdAt: it.createdAt as string,
+    updatedAt: it.updatedAt as string,
+  }));
+}
+
+export async function putRecurring(record: RecurringRecord): Promise<void> {
+  await doc.send(
+    new PutCommand({
+      TableName: config.tableName,
+      Item: { PK, SK: `REC#${record.slug}`, ...record },
+    }),
+  );
+  logger.info('recurrente actualizado', { slug: record.slug, status: record.status });
 }
 
 // ── Cuentas (modelo de saldos, items ACC#<id>) ─────────────────────────────

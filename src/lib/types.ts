@@ -96,6 +96,29 @@ export interface Account {
   updatedAt: string;
 }
 
+// ── Gastos recurrentes aprendidos (items REC#<slug>) ───────────────────────
+
+export type RecurringStatus = 'candidate' | 'confirmed' | 'rejected';
+
+/**
+ * Conocimiento persistente sobre un gasto recurrente. Nace como `candidate`
+ * cuando la heurística lo detecta (y el bot pregunta); el usuario lo vuelve
+ * `confirmed` o `rejected` con los botones. Los rechazados no se vuelven a
+ * preguntar; los confirmados alimentan al asesor con su día típico de pago.
+ */
+export interface RecurringRecord {
+  slug: string;
+  descripcion: string;
+  categoria: string;
+  montoTipico: number;
+  /** Día del mes en que suele caer (mediana). */
+  diaTipico: number;
+  status: RecurringStatus;
+  source: 'auto' | 'user';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly';
 
 export interface ScheduleEvent {

@@ -8,12 +8,13 @@ export type Command =
   | { kind: 'reporte' }
   | { kind: 'nada' }
   | { kind: 'categorias' }
+  | { kind: 'recurrentes' }
   | { kind: 'export' }
   | { kind: 'saldo'; set: { account: AccountId; amount: number } | null; invalidArgs: boolean }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
-const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -34,6 +35,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'nada' };
     case 'categorias':
       return { kind: 'categorias' };
+    case 'recurrentes':
+      return { kind: 'recurrentes' };
     case 'export':
       return { kind: 'export' };
     case 'saldo': {
@@ -87,6 +90,7 @@ export const HELP_TEXT = [
   '/nada — registrar día sin movimientos',
   '/categorias — tu base de conocimientos de categorías',
   '/saldo — cuánto tienes en cada cuenta (ajusta con: /saldo efectivo 350)',
+  '/recurrentes — tus gastos recurrentes aprendidos y por confirmar',
   '/export — el mes en curso como archivo CSV',
   '/borrar N — elimina el movimiento #N de hoy',
   '',
@@ -104,6 +108,7 @@ export const BOT_COMMANDS = [
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'saldo', description: 'Saldos de tus cuentas' },
+  { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },

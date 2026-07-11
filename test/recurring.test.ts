@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectRecurring } from '../src/lib/recurring';
-import type { Transaction } from '../src/lib/types';
+import { detectRecurring, findNewCandidates, recurringForAdvisor, recurringSlug } from '../src/lib/recurring';
+import type { RecurringRecord, Transaction } from '../src/lib/types';
 
 let n = 0;
 function txn(date: string, description: string, amount: number, partial: Partial<Transaction> = {}): Transaction {
@@ -54,13 +54,94 @@ describe('detectRecurring', () => {
     expect(rec[0]!.montoTipico).toBe(15);
   });
 
-  it('ordena por monto descendente', () => {
+  it('ordena por monto descendente y calcula el día típico (mediana)', () => {
     const rec = detectRecurring([
-      txn('2026-05-01', 'Chico', 10),
-      txn('2026-06-01', 'Chico', 10),
-      txn('2026-05-01', 'Grande', 1000),
-      txn('2026-06-01', 'Grande', 1000),
+      txn('2026-05-04', 'Chico', 10),
+      txn('2026-06-06', 'Chico', 10),
+      txn('2026-05-08', 'Grande', 1000),
+      txn('2026-06-06', 'Grande', 1000),
+      txn('2026-07-07', 'Grande', 1000),
     ]);
     expect(rec.map((r) => r.descripcion)).toEqual(['Grande', 'Chico']);
+    expect(rec[0]!.diaTipico).toBe(7); // mediana de 8, 6, 7
+    expect(rec[1]!.diaTipico).toBe(4); // mediana de 4, 6 → el menor de los centrales
+  });
+});
+
+const record = (slug: string, status: RecurringRecord['status'], extra: Partial<RecurringRecord> = {}): RecurringRecord => ({
+  slug,
+  descripcion: slug,
+  categoria: 'servicios',
+  montoTipico: 100,
+  diaTipico: 10,
+  status,
+  source: 'auto',
+  createdAt: '',
+  updatedAt: '',
+  ...extra,
+});
+
+describe('findNewCandidates', () => {
+  it('solo devuelve detectados que no existen en REC# (cualquier estado cuenta como conocido)', () => {
+    const detected = detectRecurring([
+      txn('2026-05-16', 'Netflix', 108.7, { category: 'suscripciones' }),
+      txn('2026-06-16', 'Netflix', 108.7, { category: 'suscripciones' }),
+      txn('2026-05-06', 'Tigo', 329),
+      txn('2026-06-06', 'Tigo', 329),
+    ]);
+    const known = [record(recurringSlug('suscripciones', 'Netflix'), 'rejected')];
+    const nuevos = findNewCandidates(detected, known);
+    expect(nuevos.map((c) => c.descripcion)).toEqual(['Tigo']);
+  });
+});
+
+describe('recurringForAdvisor', () => {
+  const netflixSlug = recurringSlug('suscripciones', 'Netflix');
+
+  it('marca estado según lo aprendido, excluye rechazados y calcula si aún viene', () => {
+    const history = [
+      txn('2026-05-16', 'Netflix', 108.7, { category: 'suscripciones' }),
+      txn('2026-06-16', 'Netflix', 108.7, { category: 'suscripciones' }),
+      txn('2026-05-06', 'Tigo', 329),
+      txn('2026-06-06', 'Tigo', 329),
+      txn('2026-05-01', 'Comisión Bimóvil', 15),
+      txn('2026-06-01', 'Comisión Bimóvil', 15),
+    ];
+    const detected = detectRecurring(history);
+    const known = [
+      record(netflixSlug, 'confirmed'),
+      record(recurringSlug('servicios', 'Comisión Bimóvil'), 'rejected'),
+    ];
+    // hoy es día 11; este mes (julio) no hay pagos aún
+    const advisor = recurringForAdvisor(detected, known, [], 11);
+
+    const netflix = advisor.find((a) => a.descripcion === 'Netflix')!;
+    expect(netflix.estado).toBe('confirmado');
+    expect(netflix.yaPagadoEsteMes).toBe(false);
+    expect(netflix.aunVieneEsteMes).toBe(true); // día 16 ≥ 11
+
+    const tigo = advisor.find((a) => a.descripcion === 'Tigo')!;
+    expect(tigo.estado).toBe('posible');
+    expect(tigo.aunVieneEsteMes).toBe(false); // día 6 < 11 y no pagado
+
+    expect(advisor.find((a) => a.descripcion.includes('Bimóvil'))).toBeUndefined();
+  });
+
+  it('ya pagado este mes apaga aunVieneEsteMes', () => {
+    const history = [
+      txn('2026-05-16', 'Netflix', 108.7, { category: 'suscripciones' }),
+      txn('2026-06-16', 'Netflix', 108.7, { category: 'suscripciones' }),
+    ];
+    const julio = [txn('2026-07-10', 'Netflix', 108.7, { category: 'suscripciones' })];
+    const advisor = recurringForAdvisor(detectRecurring(history), [], julio, 11);
+    expect(advisor[0]!.yaPagadoEsteMes).toBe(true);
+    expect(advisor[0]!.aunVieneEsteMes).toBe(false);
+  });
+
+  it('conserva confirmados que la heurística ya no ve', () => {
+    const advisor = recurringForAdvisor([], [record('x|seguro-anual', 'confirmed', { descripcion: 'Seguro anual', montoTipico: 1200, diaTipico: 20 })], [], 11);
+    expect(advisor).toHaveLength(1);
+    expect(advisor[0]!.estado).toBe('confirmado');
+    expect(advisor[0]!.aunVieneEsteMes).toBe(true);
   });
 });

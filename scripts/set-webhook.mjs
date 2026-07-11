@@ -63,6 +63,7 @@ const commands = [
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'saldo', description: 'Saldos de tus cuentas' },
+  { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },

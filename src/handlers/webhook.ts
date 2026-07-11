@@ -4,7 +4,8 @@ import { answerQuestion, correctTransaction, parseReceipt, parseTransactions } f
 import type { ParseOutcome } from '../lib/ai/parse';
 import { DEFAULT_ACCOUNTS, computeBalances, renderSaldos } from '../lib/accounts';
 import { computeAggregates } from '../lib/aggregates';
-import { detectRecurring } from '../lib/recurring';
+import { detectRecurring, findNewCandidates, recurringForAdvisor } from '../lib/recurring';
+import type { RecurringPayment } from '../lib/recurring';
 import { HELP_TEXT, matchCommand, matchCorrection } from '../lib/commands';
 import type { Command } from '../lib/commands';
 import { config } from '../lib/config';
@@ -15,10 +16,12 @@ import {
   getOrSeedAccounts,
   getTransaction,
   listCategories,
+  listRecurring,
   markReported,
   markReportedAndReserveShortIds,
   putAccount,
   putCategoryIfAbsent,
+  putRecurring,
   putTransactions,
   queryDay,
   queryMonth,
@@ -244,6 +247,67 @@ async function saveAndConfirm(
     reply += `\n🆕 Nueva categoría creada: ${cat.emoji} ${escapeHtml(cat.name)}`;
   }
   await sendMessage(chatId, reply, { keyboard: deleteKeyboard(txns) });
+
+  // Aprendizaje: si aparecieron posibles recurrentes nuevos, preguntar.
+  await askAboutNewRecurring(chatId).catch((err) =>
+    logger.error('detección de recurrentes falló', { error: String(err) }),
+  );
+}
+
+// ── Aprendizaje de gastos recurrentes ──────────────────────────────────────
+
+const MAX_RECURRING_QUESTIONS = 2;
+
+/**
+ * Detecta candidatos a recurrente que aún no están en la base de conocimientos
+ * y se los pregunta al usuario con botones. La respuesta queda aprendida:
+ * confirmados alimentan al asesor, rechazados no se vuelven a preguntar.
+ */
+async function askAboutNewRecurring(chatId: number): Promise<void> {
+  const [monthTxns, prevTxns, prev2Txns, known] = await Promise.all([
+    queryMonth(monthPrefixGT(0)),
+    queryMonth(monthPrefixGT(-1)),
+    queryMonth(monthPrefixGT(-2)),
+    listRecurring(),
+  ]);
+  const detected = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns]);
+  const candidates = findNewCandidates(detected, known).slice(0, MAX_RECURRING_QUESTIONS);
+
+  const now = new Date().toISOString();
+  for (const candidate of candidates) {
+    // Se guarda como candidate ANTES de preguntar: no volver a preguntar aunque no responda.
+    await putRecurring({
+      slug: candidate.slug,
+      descripcion: candidate.descripcion,
+      categoria: candidate.categoria,
+      montoTipico: candidate.montoTipico,
+      diaTipico: candidate.diaTipico,
+      status: 'candidate',
+      source: 'auto',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await sendRecurringQuestion(chatId, candidate);
+  }
+}
+
+async function sendRecurringQuestion(chatId: number, candidate: RecurringPayment): Promise<void> {
+  await sendMessage(
+    chatId,
+    [
+      '🔁 Detecté un posible gasto recurrente:',
+      `<b>${escapeHtml(candidate.descripcion)}</b> — ~${formatQ(candidate.montoTipico)}/mes (suele caer el día ${candidate.diaTipico})`,
+      '¿Lo aprendo como recurrente para tus análisis?',
+    ].join('\n'),
+    {
+      keyboard: [
+        [
+          { text: '✅ Sí, es recurrente', callback_data: `rec:y:${candidate.slug}` },
+          { text: '❌ No', callback_data: `rec:n:${candidate.slug}` },
+        ],
+      ],
+    },
+  );
 }
 
 /** Botones 🗑️ por movimiento (callback_data del:<sk>, ≤64 bytes). */
@@ -283,22 +347,19 @@ function summarizePeriod(label: string, txns: Transaction[], days: number) {
 async function buildSnapshot(today: string) {
   const month = monthPrefixGT(0);
   const prevMonth = monthPrefixGT(-1);
-  const [balances, monthTxns, prevTxns, prev2Txns, weekTxns] = await Promise.all([
+  const [balances, monthTxns, prevTxns, prev2Txns, weekTxns, knownRecurring] = await Promise.all([
     loadBalances(today),
     queryMonth(month),
     queryMonth(prevMonth),
     queryMonth(monthPrefixGT(-2)),
     queryRange(daysAgoGT(6), today),
+    listRecurring(),
   ]);
   const netoLiquido = Math.round(balances.reduce((acc, b) => acc + b.balance, 0) * 100) / 100;
 
-  // Recurrentes detectados sobre ~3 meses de historia (top 12 por monto)
-  const recurring = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns]).slice(0, 12);
-  const paidThisMonth = new Set(
-    recurring
-      .filter((r) => monthTxns.some((t) => t.type === 'gasto' && t.description === r.descripcion))
-      .map((r) => r.descripcion),
-  );
+  // Recurrentes: heurística fresca + estado aprendido (confirmado/posible; rechazados fuera)
+  const detected = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns]);
+  const pagosRecurrentes = recurringForAdvisor(detected, knownRecurring, monthTxns, daysElapsedInMonthGT()).slice(0, 15);
 
   return {
     fecha: today,
@@ -310,10 +371,7 @@ async function buildSnapshot(today: string) {
       estimado: b.estimated,
     })),
     netoLiquido,
-    pagosRecurrentesDetectados: recurring.map((r) => ({
-      ...r,
-      yaPagadoEsteMes: paidThisMonth.has(r.descripcion),
-    })),
+    pagosRecurrentes,
     mesActual: summarizePeriod(
       `${monthLabelES(month)} (al día ${daysElapsedInMonthGT()})`,
       monthTxns,
@@ -340,6 +398,31 @@ async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
     await deleteTransaction(sk);
     await answerCallbackQuery(callback.id, 'Eliminado 🗑️');
     await sendMessage(chatId, `🗑️ Eliminado:\n${renderTxnLine(txn)}${txn.date !== todayGT() ? ` · 📅 ${txn.date}` : ''}`);
+    return;
+  }
+
+  // Respuesta a "¿es recurrente?": rec:y:<slug> / rec:n:<slug>
+  if (data.startsWith('rec:')) {
+    const confirmed = data.startsWith('rec:y:');
+    const slug = data.slice(6);
+    const record = (await listRecurring()).find((r) => r.slug === slug);
+    if (!record) {
+      await answerCallbackQuery(callback.id, 'Ese candidato ya no existe');
+      return;
+    }
+    await putRecurring({
+      ...record,
+      status: confirmed ? 'confirmed' : 'rejected',
+      source: 'user',
+      updatedAt: new Date().toISOString(),
+    });
+    await answerCallbackQuery(callback.id, confirmed ? 'Aprendido ✅' : 'Anotado, no es recurrente');
+    await sendMessage(
+      chatId,
+      confirmed
+        ? `✅ Aprendido: <b>${escapeHtml(record.descripcion)}</b> (~${formatQ(record.montoTipico)}/mes, día ~${record.diaTipico}) ya cuenta como recurrente en tus análisis.`
+        : `👍 Anotado: <b>${escapeHtml(record.descripcion)}</b> no es recurrente. No te lo vuelvo a preguntar.`,
+    );
     return;
   }
 
@@ -378,6 +461,39 @@ async function handleCommand(chatId: number, today: string, command: Command): P
         lines.push('', 'Cuando un movimiento no encaje en ninguna, crearé una nueva automáticamente.');
       }
       await sendMessage(chatId, lines.join('\n'));
+      return;
+    }
+
+    case 'recurrentes': {
+      const known = await listRecurring();
+      const confirmed = known.filter((r) => r.status === 'confirmed');
+      const pending = known.filter((r) => r.status === 'candidate');
+
+      const lines = ['🔁 <b>Gastos recurrentes</b>', ''];
+      if (confirmed.length > 0) {
+        lines.push('<b>Aprendidos:</b>');
+        for (const r of [...confirmed].sort((a, b) => b.montoTipico - a.montoTipico)) {
+          lines.push(`✅ ${escapeHtml(r.descripcion)} — ~${formatQ(r.montoTipico)}/mes (día ~${r.diaTipico})`);
+        }
+      } else {
+        lines.push('Aún no has confirmado ninguno.');
+      }
+      if (pending.length > 0) {
+        lines.push('', `<b>Por confirmar (${pending.length}):</b> responde con los botones ⤵️`);
+      }
+      await sendMessage(chatId, lines.join('\n'));
+
+      // Reenviar la pregunta de los pendientes (por si quedaron sin responder)
+      for (const r of pending.slice(0, 3)) {
+        await sendRecurringQuestion(chatId, {
+          slug: r.slug,
+          descripcion: r.descripcion,
+          categoria: r.categoria,
+          montoTipico: r.montoTipico,
+          diaTipico: r.diaTipico,
+          meses: 0,
+        });
+      }
       return;
     }
 
