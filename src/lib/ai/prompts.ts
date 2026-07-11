@@ -10,7 +10,11 @@ Reglas:
 - Depósitos a ahorro → type: deposito, category: ahorro. Retiros de cajero → type: retiro, method: debito.
 - Si el mensaje dice que no hubo movimientos ("hoy nada", "sin gastos"), devuelve {"transactions":[],"clarification":null}.
 - Si un movimiento es ambiguo en el MONTO (no se entiende la cifra), no lo inventes: omítelo y pon en "clarification" una pregunta corta en español para el usuario. La ambigüedad en categoría NO amerita pregunta: usa tu mejor criterio u "otros".
-- Nunca inventes transacciones que no estén en el mensaje.`;
+- Nunca inventes transacciones que no estén en el mensaje.
+
+Además de lo anterior, incluye SIEMPRE el campo booleano "noMovements":
+- true ÚNICAMENTE cuando el mensaje dice de forma explícita que no hubo movimientos ("hoy nada", "sin gastos", "no gasté nada", "no compré nada hoy").
+- false en cualquier otro caso. En particular: saludos, preguntas o mensajes que no hablan de dinero llevan noMovements=false con "transactions" vacío y "clarification" null.`;
 
 export const CORRECT_SYSTEM_PROMPT = `Eres un corrector de transacciones financieras personales en Guatemala. Recibes una transacción ya registrada (JSON), el mensaje original del usuario y una instrucción de corrección en lenguaje natural.
 

@@ -130,13 +130,22 @@ async function handleFreeText(
   text: string,
   transcript?: string,
 ): Promise<void> {
-  const { transactions, clarification } = await parseTransactions(text);
+  const { transactions, clarification, noMovements } = await parseTransactions(text);
+
+  // En respuestas de voz, mostrar siempre lo que se escuchó.
+  const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
 
   if (transactions.length === 0) {
     if (clarification) {
-      await sendMessage(chatId, `❓ ${escapeHtml(clarification)}`);
+      await sendMessage(chatId, `${heard}❓ ${escapeHtml(clarification)}`);
+    } else if (noMovements) {
+      await sendMessage(chatId, `${heard}👍 Anotado: día sin movimientos.`);
     } else {
-      await sendMessage(chatId, '👍 Anotado: día sin movimientos.');
+      // Saludo o mensaje que no habla de dinero: no registrar nada.
+      await sendMessage(
+        chatId,
+        `${heard}👋 ¡Hola! No identifiqué movimientos en tu mensaje. Cuéntame tus gastos o ingresos del día, o dime "hoy nada" si no hubo.`,
+      );
     }
     return;
   }

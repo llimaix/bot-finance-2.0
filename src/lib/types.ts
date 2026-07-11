@@ -50,6 +50,9 @@ export interface Transaction extends ParsedTransaction {
 export interface ParseResult {
   transactions: ParsedTransaction[];
   clarification: string | null;
+  /** true solo cuando el mensaje dice explícitamente que no hubo movimientos
+   *  ("hoy nada", "sin gastos"); false para saludos o mensajes ajenos al dinero. */
+  noMovements: boolean;
 }
 
 export type ScheduleKind = 'primary' | 'followup' | 'monthly';

@@ -19,4 +19,7 @@ export const parsedTransactionSchema = z.object({
 export const parseResultSchema = z.object({
   transactions: z.array(parsedTransactionSchema),
   clarification: z.string().nullable(),
+  // Distingue "hoy no hubo movimientos" (explícito) de un mensaje que
+  // simplemente no habla de dinero (saludo, pregunta, etc.).
+  noMovements: z.boolean(),
 });

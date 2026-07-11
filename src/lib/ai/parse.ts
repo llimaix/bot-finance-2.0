@@ -26,7 +26,7 @@ export async function parseTransactions(text: string): Promise<ParseResult> {
   const transactions = raw.transactions.filter((t) => Number.isFinite(t.amount) && t.amount > 0);
   const dropped = raw.transactions.length - transactions.length;
   logger.info('parseo completado', { rawMessage: text, parsed: raw, dropped });
-  return { transactions, clarification: raw.clarification };
+  return { transactions, clarification: raw.clarification, noMovements: raw.noMovements };
 }
 
 /** Regenera una transacción aplicando una corrección en lenguaje natural. */
