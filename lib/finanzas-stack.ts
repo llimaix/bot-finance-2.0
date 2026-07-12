@@ -49,6 +49,7 @@ export class FinanzasStack extends Stack {
       // (en CI vienen del environment de GitHub; vacías → default con ||).
       LLM_PROVIDER: process.env.LLM_PROVIDER || 'anthropic',
       LLM_MODEL: process.env.LLM_MODEL || 'claude-haiku-4-5',
+      LLM_MODEL_AGENT: process.env.LLM_MODEL_AGENT || 'claude-sonnet-5',
       STT_PROVIDER: process.env.STT_PROVIDER || 'aws',
     };
 

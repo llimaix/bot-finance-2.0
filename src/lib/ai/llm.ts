@@ -21,11 +21,11 @@ import { config } from '../config';
  *   OpenAI nativo:        pnpm add @ai-sdk/openai
  *     case 'openai':      return createOpenAI()(config.llmModel);
  */
-export function getModel(): LanguageModel {
+function providerModel(modelId: string): LanguageModel {
   switch (config.llmProvider) {
     case 'anthropic':
       // Lee ANTHROPIC_API_KEY del entorno por sí solo.
-      return createAnthropic()(config.llmModel);
+      return createAnthropic()(modelId);
 
     case 'minimax':
       return createOpenAICompatible({
@@ -33,11 +33,21 @@ export function getModel(): LanguageModel {
         // Endpoint internacional compatible con OpenAI (https://platform.minimax.io)
         baseURL: 'https://api.minimax.io/v1',
         apiKey: config.minimaxApiKey,
-      })(config.llmModel);
+      })(modelId);
 
     default:
       throw new Error(
         `LLM_PROVIDER no soportado: "${config.llmProvider}". Agrega su case en src/lib/ai/llm.ts`,
       );
   }
+}
+
+/** Modelo de trabajo (parseo de comprobantes, correcciones, narrativas). */
+export function getModel(): LanguageModel {
+  return providerModel(config.llmModel);
+}
+
+/** Modelo del AGENTE conversacional: más capaz, solo para el tool loop. */
+export function getAgentModel(): LanguageModel {
+  return providerModel(config.llmModelAgent);
 }

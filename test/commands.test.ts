@@ -34,6 +34,10 @@ describe('matchCommand', () => {
     expect(matchCommand('/recurrentes')).toEqual({ kind: 'recurrentes' });
   });
 
+  it('/memoria lista los hechos aprendidos', () => {
+    expect(matchCommand('/memoria')).toEqual({ kind: 'memoria' });
+  });
+
   it('/saldo: ver, ajustar y argumentos inválidos', () => {
     expect(matchCommand('/saldo')).toEqual({ kind: 'saldo', set: null, invalidArgs: false });
     expect(matchCommand('/saldo efectivo 350')).toEqual({

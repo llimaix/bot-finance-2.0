@@ -9,12 +9,13 @@ export type Command =
   | { kind: 'nada' }
   | { kind: 'categorias' }
   | { kind: 'recurrentes' }
+  | { kind: 'memoria' }
   | { kind: 'export' }
   | { kind: 'saldo'; set: { account: AccountId; amount: number } | null; invalidArgs: boolean }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
-const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -37,6 +38,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'categorias' };
     case 'recurrentes':
       return { kind: 'recurrentes' };
+    case 'memoria':
+      return { kind: 'memoria' };
     case 'export':
       return { kind: 'export' };
     case 'saldo': {
@@ -91,6 +94,7 @@ export const HELP_TEXT = [
   '/categorias — tu base de conocimientos de categorías',
   '/saldo — cuánto tienes en cada cuenta (ajusta con: /saldo efectivo 350)',
   '/recurrentes — tus gastos recurrentes aprendidos y por confirmar',
+  '/memoria — los hechos que el agente ha aprendido de ti',
   '/export — el mes en curso como archivo CSV',
   '/borrar N — elimina el movimiento #N de hoy',
   '',
@@ -109,6 +113,7 @@ export const BOT_COMMANDS = [
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'saldo', description: 'Saldos de tus cuentas' },
   { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
+  { command: 'memoria', description: 'Hechos que el agente aprendió de ti' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },
   { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
   { command: 'ayuda', description: 'Cómo usar el bot' },

@@ -119,6 +119,15 @@ export interface RecurringRecord {
   updatedAt: string;
 }
 
+// ── Memoria de hechos (items FACT#<id>) ────────────────────────────────────
+
+/** Hecho durable que Allan le enseñó al agente ("mi salario cae el 15 y 29"). */
+export interface Fact {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
 // ── Memoria conversacional corta ───────────────────────────────────────────
 
 export interface ConversationMessage {

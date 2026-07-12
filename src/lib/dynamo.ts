@@ -16,6 +16,7 @@ import type {
   Account,
   CategoryRecord,
   ConversationMessage,
+  Fact,
   ParsedTransaction,
   RecurringRecord,
   Transaction,
@@ -132,6 +133,40 @@ export async function getOrSeedCategories(): Promise<CategoryRecord[]> {
   for (const seed of seeds) await putCategoryIfAbsent(seed);
   logger.info('base de conocimientos sembrada', { count: seeds.length });
   return seeds;
+}
+
+// ── Memoria de hechos (items FACT#<id>) ────────────────────────────────────
+
+const FACTS_LIMIT = 50;
+
+export async function listFacts(): Promise<Fact[]> {
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: config.tableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'FACT#' },
+    }),
+  );
+  return (res.Items ?? [])
+    .map((it) => ({ id: it.id as string, text: it.text as string, createdAt: it.createdAt as string }))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export async function putFact(fact: Fact): Promise<void> {
+  const existing = await listFacts();
+  if (existing.length >= FACTS_LIMIT) {
+    throw new Error(`Límite de ${FACTS_LIMIT} hechos alcanzado; borra alguno con /memoria`);
+  }
+  await doc.send(
+    new PutCommand({ TableName: config.tableName, Item: { PK, SK: `FACT#${fact.id}`, ...fact } }),
+  );
+  logger.info('hecho aprendido', { id: fact.id, text: fact.text });
+}
+
+export async function deleteFact(id: string): Promise<void> {
+  await doc.send(
+    new DeleteCommand({ TableName: config.tableName, Key: { PK, SK: `FACT#${id}` } }),
+  );
 }
 
 // ── Memoria conversacional corta (item CONV#main) ──────────────────────────

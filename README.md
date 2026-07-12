@@ -34,7 +34,9 @@ EventBridge Scheduler (hora de Guatemala)
 | `/semana` | Resumen de los últimos 7 días por categoría |
 | `/mes` | Resumen del mes en curso |
 | `/reporte` | Reporte completo del mes en curso con análisis de la IA |
-| ❓ (pregunta libre) | "¿Cuánto tengo?", "¿cuánto llevo en comida?", "¿me alcanza para una Play 5?" — responde y **asesora** con tus saldos, recurrentes y agregados (calculados en código; el LLM solo narra el veredicto) |
+| ❓ (pregunta libre) | "¿Cuánto tengo?", "¿cuánto gasté en farmacias en mayo?", "¿me alcanza para una Play 5?" — el agente consulta tus datos (saldos, recurrentes, búsqueda histórica) y **asesora** con veredicto |
+| 💬 (instrucciones y hechos) | "En Banrural solo tengo 40" ajusta la cuenta; "mi salario cae el 15 y el 29" queda **aprendido para siempre** (`/memoria` para ver/olvidar) |
+| `/memoria` | Hechos que el agente aprendió de ti, con borrado por botones |
 | `/saldo` | Saldos por cuenta (banco, tarjeta, efectivo, kash) + neto líquido. Ajusta semillas: `/saldo efectivo 350` |
 | `/categorias` | Ver la base de conocimientos de categorías |
 | `/borrar N` | Elimina el movimiento #N de hoy (o usa el botón 🗑️ bajo cada confirmación) |

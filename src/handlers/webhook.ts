@@ -7,6 +7,7 @@ import type { ParseOutcome } from '../lib/ai/parse';
 import { DEFAULT_ACCOUNTS, computeBalances, renderSaldos } from '../lib/accounts';
 import { computeAggregates } from '../lib/aggregates';
 import { detectRecurring, findNewCandidates, recurringForAdvisor } from '../lib/recurring';
+import { summarizeSearch } from '../lib/search';
 import type { RecurringPayment } from '../lib/recurring';
 import { HELP_TEXT, matchCommand, matchCorrection } from '../lib/commands';
 import type { Command } from '../lib/commands';
@@ -14,13 +15,16 @@ import { config } from '../lib/config';
 import { daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from '../lib/dates';
 import {
   appendConversation,
+  deleteFact,
   deleteTransaction,
   findByShortId,
   getConversation,
   getOrSeedAccounts,
   getTransaction,
   listCategories,
+  listFacts,
   listRecurring,
+  putFact,
   markReported,
   markReportedAndReserveShortIds,
   putAccount,
@@ -175,10 +179,11 @@ async function route(message: TelegramMessage): Promise<void> {
 // ── Agente conversacional (texto y voz) ────────────────────────────────────
 
 async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {
-  const [history, balances, cats] = await Promise.all([
+  const [history, balances, cats, facts] = await Promise.all([
     getConversation(),
     loadBalances(today),
     listCategories(),
+    listFacts(),
   ]);
 
   const contextInfo = [
@@ -186,6 +191,9 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       .map((b) => `${b.name} [id:${b.id}]: ${formatQ(b.balance)}${b.estimated ? ' (estimado)' : ''}`)
       .join('; ')}.`,
     `Catálogo de categorías: ${cats.map((c) => c.name).join(', ')}.`,
+    ...(facts.length > 0
+      ? [`Hechos que Allan te ha enseñado:\n${facts.map((f) => `- ${f.text}`).join('\n')}`]
+      : []),
   ].join('\n');
 
   const deps: AgentDeps = {
@@ -221,6 +229,17 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     },
     markNoMovements: async () => {
       await markReported(today);
+    },
+    rememberFact: async (dato) => {
+      await putFact({ id: ulid(), text: dato.trim(), createdAt: new Date().toISOString() });
+      return { ok: true, aprendido: dato.trim() };
+    },
+    searchMovements: async ({ desde, hasta, categoria, texto }) => {
+      // acotar el rango para no barrer la tabla completa
+      const from = desde <= hasta ? desde : hasta;
+      const to = desde <= hasta ? hasta : desde;
+      const txns = await queryRange(from, to);
+      return { rango: { desde: from, hasta: to }, ...summarizeSearch(txns, { categoria, texto }) };
     },
   };
 
@@ -520,6 +539,20 @@ async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
     return;
   }
 
+  // Borrar un hecho aprendido: fct:d:<id>
+  if (data.startsWith('fct:d:')) {
+    const id = data.slice(6);
+    const fact = (await listFacts()).find((f) => f.id === id);
+    if (!fact) {
+      await answerCallbackQuery(callback.id, 'Ese hecho ya no existe');
+      return;
+    }
+    await deleteFact(id);
+    await answerCallbackQuery(callback.id, 'Olvidado 🗑️');
+    await sendMessage(chatId, `🗑️ Olvidado: "${escapeHtml(fact.text)}"`);
+    return;
+  }
+
   logger.warn('callback no reconocido', { data });
   await answerCallbackQuery(callback.id);
 }
@@ -555,6 +588,29 @@ async function handleCommand(chatId: number, today: string, command: Command): P
         lines.push('', 'Cuando un movimiento no encaje en ninguna, crearé una nueva automáticamente.');
       }
       await sendMessage(chatId, lines.join('\n'));
+      return;
+    }
+
+    case 'memoria': {
+      const facts = await listFacts();
+      if (facts.length === 0) {
+        await sendMessage(
+          chatId,
+          '🧠 Aún no he aprendido hechos tuyos. Cuéntame cosas como "mi salario cae el 15 y el 29" y las recordaré.',
+        );
+        return;
+      }
+      const lines = [
+        `🧠 <b>Lo que sé de ti</b> (${facts.length} hechos):`,
+        '',
+        ...facts.map((f, i) => `${i + 1}. ${escapeHtml(f.text)}`),
+        '',
+        'Borra alguno con los botones ⤵️',
+      ];
+      const keyboard: InlineKeyboardButton[][] = [];
+      const buttons = facts.map((f, i) => ({ text: `🗑️ ${i + 1}`, callback_data: `fct:d:${f.id}` }));
+      for (let i = 0; i < buttons.length; i += 4) keyboard.push(buttons.slice(i, i + 4));
+      await sendMessage(chatId, lines.join('\n'), { keyboard });
       return;
     }
 

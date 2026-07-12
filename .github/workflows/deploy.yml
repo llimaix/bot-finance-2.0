@@ -72,6 +72,7 @@ jobs:
           # es editarlas en GitHub y relanzar el workflow — sin tocar código.
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_MODEL_AGENT: ${{ vars.LLM_MODEL_AGENT }}
           STT_PROVIDER: ${{ vars.STT_PROVIDER }}
           BILLING_ALERT_EMAIL: ${{ vars.BILLING_ALERT_EMAIL }}
 

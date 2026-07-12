@@ -26,6 +26,10 @@ export const config = {
   get llmModel() {
     return process.env.LLM_MODEL || 'claude-haiku-4-5';
   },
+  /** Modelo del tool loop del agente: razonamiento superior solo donde importa. */
+  get llmModelAgent() {
+    return process.env.LLM_MODEL_AGENT || 'claude-sonnet-5';
+  },
   get sttProvider() {
     return process.env.STT_PROVIDER || 'aws';
   },

@@ -4,7 +4,7 @@ import { weekdayGT } from '../dates';
 import { logger } from '../logger';
 import { ACCOUNT_IDS } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
-import { getModel } from './llm';
+import { getAgentModel } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
 import { newCategorySchema, parsedTransactionSchema } from './schema';
 
@@ -20,7 +20,7 @@ export interface RegisteredBatch {
 
 export interface AgentDeps {
   today: string;
-  /** Cuentas con saldos + catálogo, formateado para el system prompt. */
+  /** Cuentas con saldos + catálogo + hechos aprendidos, formateado para el system prompt. */
   contextInfo: string;
   register: (input: {
     transactions: Array<z.infer<typeof parsedTransactionSchema>>;
@@ -33,6 +33,13 @@ export interface AgentDeps {
     nuevoNombre: string | null;
   }) => Promise<unknown>;
   markNoMovements: () => Promise<void>;
+  rememberFact: (dato: string) => Promise<unknown>;
+  searchMovements: (input: {
+    desde: string;
+    hasta: string;
+    categoria: string | null;
+    texto: string | null;
+  }) => Promise<unknown>;
 }
 
 export interface AgentResult {
@@ -53,7 +60,7 @@ export async function runAgent(
   const registered: Transaction[] = [];
 
   const result = await generateText({
-    model: getModel(),
+    model: getAgentModel(),
     system: buildAgentSystemPrompt({
       today: deps.today,
       weekday: weekdayGT(),
@@ -114,6 +121,25 @@ export async function runAgent(
           await deps.markNoMovements();
           return { ok: true };
         },
+      }),
+
+      recordar_dato: tool({
+        description:
+          'Guarda un hecho DURABLE que Allan comparta o corrija sobre sus finanzas o preferencias ("mi salario cae el 15 y el 29", "FELI es la veterinaria", "mi meta es ahorrar Q2,000/mes"). No para movimientos ni datos pasajeros. Escribe el dato en tercera persona, conciso.',
+        inputSchema: z.object({ dato: z.string().min(5) }),
+        execute: async ({ dato }) => deps.rememberFact(dato),
+      }),
+
+      buscar_movimientos: tool({
+        description:
+          'Busca en TODO el historial de movimientos por rango de fechas (yyyy-mm-dd), con filtros opcionales de categoría y texto en la descripción. Úsala para preguntas históricas que el snapshot no cubre ("¿cuánto gasté en farmacias en mayo?"). Devuelve totales por tipo, gastos por categoría y hasta 20 movimientos.',
+        inputSchema: z.object({
+          desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          categoria: z.string().nullable(),
+          texto: z.string().nullable(),
+        }),
+        execute: async (input) => deps.searchMovements(input),
       }),
     },
     stopWhen: stepCountIs(5),
