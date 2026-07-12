@@ -21,6 +21,7 @@ import {
   deleteTransaction,
   findByShortId,
   getConversation,
+  getLastRecurringAskAt,
   getOrSeedAccounts,
   getTransaction,
   listCategories,
@@ -36,6 +37,7 @@ import {
   queryDay,
   queryMonth,
   queryRange,
+  setLastRecurringAskAt,
   tryClaimUpdate,
   updateTransactionFields,
 } from '../lib/dynamo';
@@ -342,13 +344,21 @@ async function saveAndConfirm(
 // ── Aprendizaje de gastos recurrentes ──────────────────────────────────────
 
 const MAX_RECURRING_QUESTIONS = 2;
+// No interrumpir cada registro: las preguntas de recurrentes esperan su turno.
+const RECURRING_ASK_COOLDOWN_MS = 4 * 3600 * 1000;
 
 /**
  * Detecta candidatos a recurrente que aún no están en la base de conocimientos
- * y se los pregunta al usuario con botones. La respuesta queda aprendida:
+ * y se los pregunta al usuario con botones (máx 2, y no más de una tanda cada
+ * 4 horas para no enterrar las confirmaciones). La respuesta queda aprendida:
  * confirmados alimentan al asesor, rechazados no se vuelven a preguntar.
  */
 async function askAboutNewRecurring(chatId: number): Promise<void> {
+  const lastAsk = await getLastRecurringAskAt();
+  if (lastAsk && Date.now() - Date.parse(lastAsk) < RECURRING_ASK_COOLDOWN_MS) {
+    return; // en cooldown: los candidatos seguirán ahí en la próxima tanda o en /recurrentes
+  }
+
   const [monthTxns, prevTxns, prev2Txns, known] = await Promise.all([
     queryMonth(monthPrefixGT(0)),
     queryMonth(monthPrefixGT(-1)),
@@ -359,7 +369,9 @@ async function askAboutNewRecurring(chatId: number): Promise<void> {
     types: ['gasto', 'ingreso'],
   });
   const candidates = findNewCandidates(detected, known).slice(0, MAX_RECURRING_QUESTIONS);
+  if (candidates.length === 0) return;
 
+  await setLastRecurringAskAt(new Date().toISOString());
   const now = new Date().toISOString();
   for (const candidate of candidates) {
     // Se guarda como candidate ANTES de preguntar: no volver a preguntar aunque no responda.

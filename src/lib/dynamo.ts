@@ -198,6 +198,21 @@ export async function appendConversation(newMessages: ConversationMessage[]): Pr
   );
 }
 
+// ── Cooldown de preguntas de recurrentes (item META#recask) ────────────────
+
+export async function getLastRecurringAskAt(): Promise<string | null> {
+  const res = await doc.send(
+    new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'META#recask' } }),
+  );
+  return (res.Item?.lastAt as string | undefined) ?? null;
+}
+
+export async function setLastRecurringAskAt(iso: string): Promise<void> {
+  await doc.send(
+    new PutCommand({ TableName: config.tableName, Item: { PK, SK: 'META#recask', lastAt: iso } }),
+  );
+}
+
 // ── Recurrentes aprendidos (items REC#<slug>) ──────────────────────────────
 
 export async function listRecurring(): Promise<RecurringRecord[]> {
