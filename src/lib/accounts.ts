@@ -2,7 +2,8 @@ import { formatQ } from './format';
 import type { Account, AccountId, Transaction } from './types';
 
 export const DEFAULT_ACCOUNTS: Array<Pick<Account, 'id' | 'name' | 'emoji'>> = [
-  { id: 'banco', name: 'Cuenta Banrural', emoji: '🏦' },
+  { id: 'banco', name: 'Banco Industrial (BI)', emoji: '🏦' },
+  { id: 'banrural', name: 'Banrural', emoji: '🌾' },
   { id: 'tarjeta', name: 'Tarjeta BAC', emoji: '💳' },
   { id: 'efectivo', name: 'Efectivo', emoji: '💵' },
   { id: 'kash', name: 'Kash', emoji: '📱' },
@@ -28,6 +29,11 @@ export function accountDelta(txn: Transaction, account: AccountId): number {
       if (txn.method === 'debito') return -a;
       if (txn.type === 'transferencia' && txn.method === 'transferencia') return -a;
       if (txn.type === 'deposito' && txn.method !== 'efectivo') return -a;
+      return 0;
+
+    case 'banrural':
+      // Cuenta secundaria casi estática: se ajusta por semilla (/saldo o el agente),
+      // los movimientos con débito se atribuyen a la cuenta principal (BI).
       return 0;
 
     case 'tarjeta':

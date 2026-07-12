@@ -81,6 +81,23 @@ function toOutcome(
   };
 }
 
+/**
+ * Materializa transacciones ya extraídas (p.ej. por la herramienta del agente):
+ * resuelve categorías contra la base de conocimientos y normaliza fechas.
+ */
+export async function materializeParsed(raw: {
+  transactions: Array<z.infer<typeof parsedTransactionSchema>>;
+  newCategories: Array<{ name: string; emoji: string }>;
+}): Promise<ParseOutcome> {
+  const { ctx, catalog, known } = await loadPromptContext();
+  return toOutcome(
+    { ...raw, clarification: null, noMovements: false, question: null },
+    catalog,
+    known,
+    ctx.today,
+  );
+}
+
 /** Convierte texto libre en transacciones estructuradas. Lanza si el proveedor falla. */
 export async function parseTransactions(text: string): Promise<ParseOutcome> {
   const { ctx, catalog, known } = await loadPromptContext();

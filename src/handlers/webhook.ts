@@ -1,6 +1,8 @@
 import { ulid } from 'ulid';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { answerQuestion, correctTransaction, parseReceipt, parseTransactions } from '../lib/ai/parse';
+import { runAgent } from '../lib/ai/agent';
+import type { AgentDeps } from '../lib/ai/agent';
+import { answerQuestion, correctTransaction, materializeParsed, parseReceipt } from '../lib/ai/parse';
 import type { ParseOutcome } from '../lib/ai/parse';
 import { DEFAULT_ACCOUNTS, computeBalances, renderSaldos } from '../lib/accounts';
 import { computeAggregates } from '../lib/aggregates';
@@ -11,8 +13,10 @@ import type { Command } from '../lib/commands';
 import { config } from '../lib/config';
 import { daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from '../lib/dates';
 import {
+  appendConversation,
   deleteTransaction,
   findByShortId,
+  getConversation,
   getOrSeedAccounts,
   getTransaction,
   listCategories,
@@ -142,8 +146,7 @@ async function route(message: TelegramMessage): Promise<void> {
   if (message.voice) {
     const audio = await getFileBuffer(message.voice.file_id);
     const transcript = await getSttProvider().transcribe(audio, message.voice.mime_type);
-    const outcome = await parseTransactions(transcript);
-    await saveAndConfirm(chatId, today, outcome, transcript, { transcript });
+    await agentFlow(chatId, today, transcript, transcript);
     return;
   }
 
@@ -153,6 +156,7 @@ async function route(message: TelegramMessage): Promise<void> {
     return;
   }
 
+  // Rutas rápidas deterministas (sin LLM): comandos y "corrige #N"
   const command = matchCommand(text);
   if (command) {
     await handleCommand(chatId, today, command);
@@ -165,8 +169,86 @@ async function route(message: TelegramMessage): Promise<void> {
     return;
   }
 
-  const outcome = await parseTransactions(text);
-  await saveAndConfirm(chatId, today, outcome, text, {});
+  await agentFlow(chatId, today, text);
+}
+
+// ── Agente conversacional (texto y voz) ────────────────────────────────────
+
+async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {
+  const [history, balances, cats] = await Promise.all([
+    getConversation(),
+    loadBalances(today),
+    listCategories(),
+  ]);
+
+  const contextInfo = [
+    `Cuentas (saldo actual): ${balances
+      .map((b) => `${b.name} [id:${b.id}]: ${formatQ(b.balance)}${b.estimated ? ' (estimado)' : ''}`)
+      .join('; ')}.`,
+    `Catálogo de categorías: ${cats.map((c) => c.name).join(', ')}.`,
+  ].join('\n');
+
+  const deps: AgentDeps = {
+    today,
+    contextInfo,
+    register: async (input) => {
+      const outcome = await materializeParsed(input);
+      const txns = await persistOutcome(outcome, userText, today);
+      const todayTxns = await queryDay(today);
+      return {
+        txns,
+        createdCategories: outcome.createdCategories,
+        totalSpentToday: sumSpent(todayTxns),
+      };
+    },
+    snapshot: () => buildSnapshot(today),
+    adjustAccount: async ({ cuenta, nuevoSaldo, nuevoNombre }) => {
+      const accounts = await getOrSeedAccounts(today);
+      const base =
+        accounts.find((a) => a.id === cuenta) ??
+        ({ ...DEFAULT_ACCOUNTS.find((d) => d.id === cuenta)!, seedBalance: 0, asOf: today, estimated: true, updatedAt: '' });
+      let saldo = nuevoSaldo ?? base.seedBalance;
+      if (cuenta === 'tarjeta' && nuevoSaldo !== null && nuevoSaldo > 0) saldo = -nuevoSaldo;
+      await putAccount({
+        ...base,
+        name: nuevoNombre?.trim() || base.name,
+        seedBalance: saldo,
+        asOf: nuevoSaldo !== null ? today : base.asOf,
+        estimated: nuevoSaldo !== null ? false : base.estimated,
+        updatedAt: new Date().toISOString(),
+      });
+      return { ok: true, cuenta: nuevoNombre?.trim() || base.name, saldoAlCierreDeHoy: saldo };
+    },
+    markNoMovements: async () => {
+      await markReported(today);
+    },
+  };
+
+  const result = await runAgent(userText, history, deps);
+
+  const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
+  let reply = `${heard}${escapeHtml(result.text)}`;
+  if (result.registered.length > 0) {
+    reply += `\n\n${result.registered
+      .map((t) => `${renderTxnLine(t)}${t.date !== today ? ` · 📅 ${t.date}` : ''}`)
+      .join('\n')}`;
+  }
+  await sendMessage(
+    chatId,
+    reply,
+    result.registered.length > 0 ? { keyboard: deleteKeyboard(result.registered) } : undefined,
+  );
+
+  await appendConversation([
+    { role: 'user', text: userText, at: new Date().toISOString() },
+    { role: 'assistant', text: result.text, at: new Date().toISOString() },
+  ]).catch((err) => logger.error('no se pudo guardar la conversación', { error: String(err) }));
+
+  if (result.registered.length > 0) {
+    await askAboutNewRecurring(chatId).catch((err) =>
+      logger.error('detección de recurrentes falló', { error: String(err) }),
+    );
+  }
 }
 
 // ── Registro compartido (texto, voz y comprobantes) ────────────────────────
@@ -203,36 +285,7 @@ async function saveAndConfirm(
     return;
   }
 
-  // Persistir primero las categorías nuevas: la base de conocimientos crece sola.
-  const createdAt = new Date().toISOString();
-  for (const cat of createdCategories) {
-    await putCategoryIfAbsent({ ...cat, source: 'auto', createdAt });
-  }
-
-  // Agrupar por fecha efectiva: los shortIds son por día ("ayer gasté..." reserva en ayer).
-  const byDate = new Map<string, typeof transactions>();
-  for (const t of transactions) {
-    const group = byDate.get(t.date) ?? [];
-    group.push(t);
-    byDate.set(t.date, group);
-  }
-
-  const txns: Transaction[] = [];
-  for (const [date, group] of byDate) {
-    const shortIds = await markReportedAndReserveShortIds(date, group.length);
-    group.forEach((t, i) => {
-      txns.push({
-        ...t,
-        sk: `TXN#${date}#${ulid()}`,
-        date,
-        shortId: shortIds[i]!,
-        rawMessage,
-        createdAt,
-        ...(categoryEmoji.has(t.category) ? { emoji: categoryEmoji.get(t.category)! } : {}),
-      });
-    });
-  }
-  await putTransactions(txns);
+  const txns = await persistOutcome(outcome, rawMessage, today);
 
   const todayTxns = await queryDay(today);
   let reply = renderConfirmation({
@@ -308,6 +361,47 @@ async function sendRecurringQuestion(chatId: number, candidate: RecurringPayment
       ],
     },
   );
+}
+
+/**
+ * Persistencia compartida (agente, voz y comprobantes): categorías nuevas,
+ * agrupación por fecha efectiva (shortIds por día) y escritura de movimientos.
+ */
+async function persistOutcome(
+  outcome: Pick<ParseOutcome, 'transactions' | 'createdCategories' | 'categoryEmoji'>,
+  rawMessage: string,
+  _today: string,
+): Promise<Transaction[]> {
+  const createdAt = new Date().toISOString();
+  for (const cat of outcome.createdCategories) {
+    await putCategoryIfAbsent({ ...cat, source: 'auto', createdAt });
+  }
+
+  // Agrupar por fecha efectiva: los shortIds son por día ("ayer gasté..." reserva en ayer).
+  const byDate = new Map<string, typeof outcome.transactions>();
+  for (const t of outcome.transactions) {
+    const group = byDate.get(t.date) ?? [];
+    group.push(t);
+    byDate.set(t.date, group);
+  }
+
+  const txns: Transaction[] = [];
+  for (const [date, group] of byDate) {
+    const shortIds = await markReportedAndReserveShortIds(date, group.length);
+    group.forEach((t, i) => {
+      txns.push({
+        ...t,
+        sk: `TXN#${date}#${ulid()}`,
+        date,
+        shortId: shortIds[i]!,
+        rawMessage,
+        createdAt,
+        ...(outcome.categoryEmoji.has(t.category) ? { emoji: outcome.categoryEmoji.get(t.category)! } : {}),
+      });
+    });
+  }
+  await putTransactions(txns);
+  return txns;
 }
 
 /** Botones 🗑️ por movimiento (callback_data del:<sk>, ≤64 bytes). */

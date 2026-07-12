@@ -12,7 +12,14 @@ import { SEED_CATEGORY_EMOJI } from './categories';
 import { config } from './config';
 import { logger } from './logger';
 import { SEED_CATEGORIES } from './types';
-import type { Account, CategoryRecord, ParsedTransaction, RecurringRecord, Transaction } from './types';
+import type {
+  Account,
+  CategoryRecord,
+  ConversationMessage,
+  ParsedTransaction,
+  RecurringRecord,
+  Transaction,
+} from './types';
 
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -125,6 +132,35 @@ export async function getOrSeedCategories(): Promise<CategoryRecord[]> {
   for (const seed of seeds) await putCategoryIfAbsent(seed);
   logger.info('base de conocimientos sembrada', { count: seeds.length });
   return seeds;
+}
+
+// ── Memoria conversacional corta (item CONV#main) ──────────────────────────
+
+const CONVERSATION_LIMIT = 12;
+const CONVERSATION_TTL_SECONDS = 72 * 3600;
+
+export async function getConversation(): Promise<ConversationMessage[]> {
+  const res = await doc.send(
+    new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'CONV#main' } }),
+  );
+  return (res.Item?.messages as ConversationMessage[] | undefined) ?? [];
+}
+
+/** Agrega mensajes al historial, recortado a los últimos N (TTL 72h). */
+export async function appendConversation(newMessages: ConversationMessage[]): Promise<void> {
+  const current = await getConversation();
+  const messages = [...current, ...newMessages].slice(-CONVERSATION_LIMIT);
+  await doc.send(
+    new PutCommand({
+      TableName: config.tableName,
+      Item: {
+        PK,
+        SK: 'CONV#main',
+        messages,
+        ttl: Math.floor(Date.now() / 1000) + CONVERSATION_TTL_SECONDS,
+      },
+    }),
+  );
 }
 
 // ── Recurrentes aprendidos (items REC#<slug>) ──────────────────────────────

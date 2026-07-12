@@ -74,7 +74,7 @@ export interface ParseResult {
 
 // ── Cuentas (modelo de saldos) ─────────────────────────────────────────────
 
-export const ACCOUNT_IDS = ['banco', 'tarjeta', 'efectivo', 'kash'] as const;
+export const ACCOUNT_IDS = ['banco', 'banrural', 'tarjeta', 'efectivo', 'kash'] as const;
 export type AccountId = (typeof ACCOUNT_IDS)[number];
 
 /**
@@ -117,6 +117,14 @@ export interface RecurringRecord {
   source: 'auto' | 'user';
   createdAt: string;
   updatedAt: string;
+}
+
+// ── Memoria conversacional corta ───────────────────────────────────────────
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  at: string;
 }
 
 export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly';
