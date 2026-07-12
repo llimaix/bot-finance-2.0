@@ -2,7 +2,7 @@ import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import { weekdayGT } from '../dates';
 import { logger } from '../logger';
-import { ACCOUNT_IDS } from '../types';
+import { ACCOUNT_IDS, METHODS, TXN_TYPES } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
 import { getAgentModel } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
@@ -42,6 +42,18 @@ export interface AgentDeps {
     categoria: string | null;
     texto: string | null;
   }) => Promise<unknown>;
+  correctMovement: (input: {
+    numero: number;
+    fecha: string | null;
+    cambios: {
+      monto: number | null;
+      tipo: (typeof TXN_TYPES)[number] | null;
+      categoria: string | null;
+      metodo: (typeof METHODS)[number] | null;
+      descripcion: string | null;
+    };
+  }) => Promise<unknown>;
+  deleteMovement: (input: { numero: number; fecha: string | null }) => Promise<unknown>;
 }
 
 export interface AgentResult {
@@ -125,6 +137,33 @@ export async function runAgent(
           await deps.markNoMovements();
           return { ok: true };
         },
+      }),
+
+      corregir_movimiento: tool({
+        description:
+          'Corrige campos de un movimiento YA registrado (por su número del día). Úsala cuando Allan diga que algo quedó mal ("los últimos pagos fueron con débito", "el #3 era Q50"). Solo envía en cambios los campos a modificar (el resto null). fecha null = hoy. Para varios movimientos, llámala una vez por cada uno.',
+        inputSchema: z.object({
+          numero: z.number().int().positive(),
+          fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+          cambios: z.object({
+            monto: z.number().nullable(),
+            tipo: z.enum(TXN_TYPES).nullable(),
+            categoria: z.string().nullable(),
+            metodo: z.enum(METHODS).nullable(),
+            descripcion: z.string().nullable(),
+          }),
+        }),
+        execute: async (input) => deps.correctMovement(input),
+      }),
+
+      eliminar_movimiento: tool({
+        description:
+          'Elimina un movimiento YA registrado (por su número del día). fecha null = hoy. Confirma con Allan antes si hay ambigüedad sobre cuál borrar.',
+        inputSchema: z.object({
+          numero: z.number().int().positive(),
+          fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+        }),
+        execute: async (input) => deps.deleteMovement(input),
       }),
 
       recordar_dato: tool({

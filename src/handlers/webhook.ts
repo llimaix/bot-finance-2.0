@@ -5,6 +5,7 @@ import type { AgentDeps } from '../lib/ai/agent';
 import { answerQuestion, correctTransaction, materializeParsed, parseReceipt } from '../lib/ai/parse';
 import type { ParseOutcome } from '../lib/ai/parse';
 import { DEFAULT_ACCOUNTS, computeBalances, renderSaldos } from '../lib/accounts';
+import { resolveCategory } from '../lib/categories';
 import { computeAggregates } from '../lib/aggregates';
 import { registrationWarnings } from '../lib/guards';
 import { loadAdvisorData, loadBalancesReadonly, renderProjection } from '../lib/insights';
@@ -241,6 +242,47 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     rememberFact: async (dato) => {
       await putFact({ id: ulid(), text: dato.trim(), createdAt: new Date().toISOString() });
       return { ok: true, aprendido: dato.trim() };
+    },
+    correctMovement: async ({ numero, fecha, cambios }) => {
+      const date = fecha ?? today;
+      const txn = await findByShortId(date, numero);
+      if (!txn) return { ok: false, error: `No existe el movimiento #${numero} del ${date}` };
+
+      let category = txn.category;
+      let emoji = txn.emoji ?? '🏷️';
+      if (cambios.categoria) {
+        const catalog = await listCategories();
+        const known = new Map(catalog.map((c) => [c.name, c]));
+        const resolved = resolveCategory(cambios.categoria, known, []);
+        if (resolved.created) {
+          await putCategoryIfAbsent({ ...resolved.created, source: 'auto', createdAt: new Date().toISOString() });
+          emoji = resolved.created.emoji;
+        } else {
+          emoji = known.get(resolved.name)?.emoji ?? emoji;
+        }
+        category = resolved.name;
+      }
+
+      const fields = {
+        amount: cambios.monto ?? txn.amount,
+        type: cambios.tipo ?? txn.type,
+        category,
+        method: cambios.metodo ?? txn.method,
+        description: cambios.descripcion ?? txn.description,
+      };
+      await updateTransactionFields(txn.sk, { ...fields, emoji });
+      return {
+        ok: true,
+        antes: { monto: txn.amount, tipo: txn.type, categoria: txn.category, metodo: txn.method, descripcion: txn.description },
+        ahora: fields,
+      };
+    },
+    deleteMovement: async ({ numero, fecha }) => {
+      const date = fecha ?? today;
+      const txn = await findByShortId(date, numero);
+      if (!txn) return { ok: false, error: `No existe el movimiento #${numero} del ${date}` };
+      await deleteTransaction(txn.sk);
+      return { ok: true, eliminado: { numero, fecha: date, monto: txn.amount, descripcion: txn.description } };
     },
     searchMovements: async ({ desde, hasta, categoria, texto }) => {
       // acotar el rango para no barrer la tabla completa
