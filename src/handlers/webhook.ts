@@ -6,7 +6,9 @@ import { answerQuestion, correctTransaction, materializeParsed, parseReceipt } f
 import type { ParseOutcome } from '../lib/ai/parse';
 import { DEFAULT_ACCOUNTS, computeBalances, renderSaldos } from '../lib/accounts';
 import { computeAggregates } from '../lib/aggregates';
-import { detectRecurring, findNewCandidates, recurringForAdvisor } from '../lib/recurring';
+import { registrationWarnings } from '../lib/guards';
+import { loadAdvisorData, loadBalancesReadonly, renderProjection } from '../lib/insights';
+import { detectRecurring, findNewCandidates } from '../lib/recurring';
 import { summarizeSearch } from '../lib/search';
 import type { RecurringPayment } from '../lib/recurring';
 import { HELP_TEXT, matchCommand, matchCorrection } from '../lib/commands';
@@ -196,17 +198,20 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       : []),
   ].join('\n');
 
+  const collectedWarnings: string[] = [];
   const deps: AgentDeps = {
     today,
     contextInfo,
     register: async (input) => {
       const outcome = await materializeParsed(input);
       const txns = await persistOutcome(outcome, userText, today);
-      const todayTxns = await queryDay(today);
+      const [todayTxns, advertencias] = await Promise.all([queryDay(today), warningsFor(txns)]);
+      collectedWarnings.push(...advertencias);
       return {
         txns,
         createdCategories: outcome.createdCategories,
         totalSpentToday: sumSpent(todayTxns),
+        advertencias,
       };
     },
     snapshot: () => buildSnapshot(today),
@@ -251,6 +256,9 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     reply += `\n\n${result.registered
       .map((t) => `${renderTxnLine(t)}${t.date !== today ? ` · 📅 ${t.date}` : ''}`)
       .join('\n')}`;
+  }
+  for (const warning of collectedWarnings) {
+    reply += `\n${escapeHtml(warning)}`;
   }
   await sendMessage(
     chatId,
@@ -306,7 +314,7 @@ async function saveAndConfirm(
 
   const txns = await persistOutcome(outcome, rawMessage, today);
 
-  const todayTxns = await queryDay(today);
+  const [todayTxns, warnings] = await Promise.all([queryDay(today), warningsFor(txns)]);
   let reply = renderConfirmation({
     txns,
     today,
@@ -317,6 +325,9 @@ async function saveAndConfirm(
   });
   for (const cat of createdCategories) {
     reply += `\n🆕 Nueva categoría creada: ${cat.emoji} ${escapeHtml(cat.name)}`;
+  }
+  for (const warning of warnings) {
+    reply += `\n${escapeHtml(warning)}`;
   }
   await sendMessage(chatId, reply, { keyboard: deleteKeyboard(txns) });
 
@@ -342,7 +353,9 @@ async function askAboutNewRecurring(chatId: number): Promise<void> {
     queryMonth(monthPrefixGT(-2)),
     listRecurring(),
   ]);
-  const detected = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns]);
+  const detected = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns], {
+    types: ['gasto', 'ingreso'],
+  });
   const candidates = findNewCandidates(detected, known).slice(0, MAX_RECURRING_QUESTIONS);
 
   const now = new Date().toISOString();
@@ -352,6 +365,7 @@ async function askAboutNewRecurring(chatId: number): Promise<void> {
       slug: candidate.slug,
       descripcion: candidate.descripcion,
       categoria: candidate.categoria,
+      tipo: candidate.tipo,
       montoTipico: candidate.montoTipico,
       diaTipico: candidate.diaTipico,
       status: 'candidate',
@@ -364,12 +378,15 @@ async function askAboutNewRecurring(chatId: number): Promise<void> {
 }
 
 async function sendRecurringQuestion(chatId: number, candidate: RecurringPayment): Promise<void> {
+  const esIngreso = candidate.tipo === 'ingreso';
   await sendMessage(
     chatId,
     [
-      '🔁 Detecté un posible gasto recurrente:',
+      esIngreso ? '🔁 Detecté un posible INGRESO recurrente:' : '🔁 Detecté un posible gasto recurrente:',
       `<b>${escapeHtml(candidate.descripcion)}</b> — ~${formatQ(candidate.montoTipico)}/mes (suele caer el día ${candidate.diaTipico})`,
-      '¿Lo aprendo como recurrente para tus análisis?',
+      esIngreso
+        ? '¿Lo aprendo como ingreso recurrente? Así podré proyectar cuánto te falta por entrar cada mes.'
+        : '¿Lo aprendo como recurrente para tus análisis?',
     ].join('\n'),
     {
       keyboard: [
@@ -423,6 +440,13 @@ async function persistOutcome(
   return txns;
 }
 
+/** Escudos: posibles duplicados y montos grandes en lo recién registrado. */
+async function warningsFor(newTxns: Transaction[]): Promise<string[]> {
+  const dates = [...new Set(newTxns.map((t) => t.date))];
+  const existing = (await Promise.all(dates.map((d) => queryDay(d)))).flat();
+  return registrationWarnings(newTxns, existing);
+}
+
 /** Botones 🗑️ por movimiento (callback_data del:<sk>, ≤64 bytes). */
 function deleteKeyboard(txns: Transaction[]): InlineKeyboardButton[][] {
   const buttons = txns.map((t) => ({ text: `🗑️ #${t.shortId}`, callback_data: `del:${t.sk}` }));
@@ -433,13 +457,7 @@ function deleteKeyboard(txns: Transaction[]): InlineKeyboardButton[][] {
 
 // ── Saldos y snapshot para preguntas ───────────────────────────────────────
 
-async function loadBalances(today: string) {
-  const accounts = await getOrSeedAccounts(today);
-  const minAsOf = accounts.reduce((min, a) => (a.asOf < min ? a.asOf : min), today);
-  // computeBalances filtra por cuenta (solo movimientos con fecha > su asOf)
-  const txns = await queryRange(minAsOf, today);
-  return computeBalances(accounts, txns);
-}
+const loadBalances = loadBalancesReadonly;
 
 function summarizePeriod(label: string, txns: Transaction[], days: number) {
   const agg = computeAggregates(txns, days);
@@ -460,38 +478,27 @@ function summarizePeriod(label: string, txns: Transaction[], days: number) {
 async function buildSnapshot(today: string) {
   const month = monthPrefixGT(0);
   const prevMonth = monthPrefixGT(-1);
-  const [balances, monthTxns, prevTxns, prev2Txns, weekTxns, knownRecurring] = await Promise.all([
-    loadBalances(today),
-    queryMonth(month),
-    queryMonth(prevMonth),
-    queryMonth(monthPrefixGT(-2)),
-    queryRange(daysAgoGT(6), today),
-    listRecurring(),
-  ]);
-  const netoLiquido = Math.round(balances.reduce((acc, b) => acc + b.balance, 0) * 100) / 100;
-
-  // Recurrentes: heurística fresca + estado aprendido (confirmado/posible; rechazados fuera)
-  const detected = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns]);
-  const pagosRecurrentes = recurringForAdvisor(detected, knownRecurring, monthTxns, daysElapsedInMonthGT()).slice(0, 15);
+  const data = await loadAdvisorData(today, daysInMonth(month));
 
   return {
     fecha: today,
-    saldos: balances.map((b) => ({
+    saldos: data.balances.map((b) => ({
       cuenta: b.name,
       id: b.id,
       saldo: b.balance,
       alCorteDe: b.asOf,
       estimado: b.estimated,
     })),
-    netoLiquido,
-    pagosRecurrentes,
+    netoLiquido: data.netoLiquido,
+    recurrentes: data.recurrentes.slice(0, 15),
+    proyeccionFinDeMes: data.proyeccion,
     mesActual: summarizePeriod(
-      `${monthLabelES(month)} (al día ${daysElapsedInMonthGT()})`,
-      monthTxns,
-      daysElapsedInMonthGT(),
+      `${monthLabelES(month)} (al día ${data.daysElapsed})`,
+      data.monthTxns,
+      data.daysElapsed,
     ),
-    mesAnterior: summarizePeriod(monthLabelES(prevMonth), prevTxns, daysInMonth(prevMonth)),
-    ultimos7Dias: summarizePeriod('últimos 7 días', weekTxns, 7),
+    mesAnterior: summarizePeriod(monthLabelES(prevMonth), data.prevTxns, daysInMonth(prevMonth)),
+    ultimos7Dias: summarizePeriod('últimos 7 días', data.weekTxns, 7),
   };
 }
 
@@ -623,7 +630,8 @@ async function handleCommand(chatId: number, today: string, command: Command): P
       if (confirmed.length > 0) {
         lines.push('<b>Aprendidos:</b>');
         for (const r of [...confirmed].sort((a, b) => b.montoTipico - a.montoTipico)) {
-          lines.push(`✅ ${escapeHtml(r.descripcion)} — ~${formatQ(r.montoTipico)}/mes (día ~${r.diaTipico})`);
+          const icon = r.tipo === 'ingreso' ? '💰' : '✅';
+          lines.push(`${icon} ${escapeHtml(r.descripcion)} — ~${formatQ(r.montoTipico)}/mes (día ~${r.diaTipico})`);
         }
       } else {
         lines.push('Aún no has confirmado ninguno.');
@@ -639,6 +647,7 @@ async function handleCommand(chatId: number, today: string, command: Command): P
           slug: r.slug,
           descripcion: r.descripcion,
           categoria: r.categoria,
+          tipo: r.tipo,
           montoTipico: r.montoTipico,
           diaTipico: r.diaTipico,
           meses: 0,
@@ -677,6 +686,12 @@ async function handleCommand(chatId: number, today: string, command: Command): P
       }
       const balances = await loadBalances(today);
       await sendMessage(chatId, renderSaldos(balances));
+      return;
+    }
+
+    case 'proyeccion': {
+      const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
+      await sendMessage(chatId, renderProjection(data));
       return;
     }
 

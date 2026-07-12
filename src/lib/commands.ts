@@ -10,12 +10,14 @@ export type Command =
   | { kind: 'categorias' }
   | { kind: 'recurrentes' }
   | { kind: 'memoria' }
+  | { kind: 'proyeccion' }
   | { kind: 'export' }
   | { kind: 'saldo'; set: { account: AccountId; amount: number } | null; invalidArgs: boolean }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
-const COMMAND_RE = /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+const COMMAND_RE =
+  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -40,6 +42,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'recurrentes' };
     case 'memoria':
       return { kind: 'memoria' };
+    case 'proyeccion':
+      return { kind: 'proyeccion' };
     case 'export':
       return { kind: 'export' };
     case 'saldo': {
@@ -93,6 +97,7 @@ export const HELP_TEXT = [
   '/nada — registrar día sin movimientos',
   '/categorias — tu base de conocimientos de categorías',
   '/saldo — cuánto tienes en cada cuenta (ajusta con: /saldo efectivo 350)',
+  '/proyeccion — cuánto te quedará a fin de mes (ingresos y compromisos pendientes)',
   '/recurrentes — tus gastos recurrentes aprendidos y por confirmar',
   '/memoria — los hechos que el agente ha aprendido de ti',
   '/export — el mes en curso como archivo CSV',
@@ -112,6 +117,7 @@ export const BOT_COMMANDS = [
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'saldo', description: 'Saldos de tus cuentas' },
+  { command: 'proyeccion', description: 'Disponible proyectado a fin de mes' },
   { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
   { command: 'memoria', description: 'Hechos que el agente aprendió de ti' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },

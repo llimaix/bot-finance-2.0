@@ -38,6 +38,10 @@ describe('matchCommand', () => {
     expect(matchCommand('/memoria')).toEqual({ kind: 'memoria' });
   });
 
+  it('/proyeccion muestra el disponible a fin de mes', () => {
+    expect(matchCommand('/proyeccion')).toEqual({ kind: 'proyeccion' });
+  });
+
   it('/saldo: ver, ajustar y argumentos inválidos', () => {
     expect(matchCommand('/saldo')).toEqual({ kind: 'saldo', set: null, invalidArgs: false });
     expect(matchCommand('/saldo efectivo 350')).toEqual({

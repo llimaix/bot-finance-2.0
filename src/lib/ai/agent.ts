@@ -16,6 +16,8 @@ export interface RegisteredBatch {
   txns: Transaction[];
   createdCategories: Array<{ name: string; emoji: string }>;
   totalSpentToday: number;
+  /** Escudos: posibles duplicados o montos inusuales (menciónalos al usuario). */
+  advertencias: string[];
 }
 
 export interface AgentDeps {
@@ -92,6 +94,7 @@ export async function runAgent(
             })),
             categoriasNuevas: batch.createdCategories.map((c) => c.name),
             totalGastadoHoy: batch.totalSpentToday,
+            ...(batch.advertencias.length > 0 ? { advertencias: batch.advertencias } : {}),
           };
         },
       }),

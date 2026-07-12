@@ -54,6 +54,23 @@ describe('detectRecurring', () => {
     expect(rec[0]!.montoTipico).toBe(15);
   });
 
+  it('detecta INGRESOS recurrentes normalizando nombres de mes (quincenas)', () => {
+    const rec = detectRecurring(
+      [
+        txn('2026-05-15', 'Salario 1ra Quincena mayo 2026', 7500, { type: 'ingreso', category: 'otros', method: 'na' }),
+        txn('2026-06-15', 'Salario 1ra Quincena Junio 2026', 7500, { type: 'ingreso', category: 'otros', method: 'na' }),
+        txn('2026-05-29', 'Salario 2da Quincena mayo 2026', 6273.2, { type: 'ingreso', category: 'otros', method: 'na' }),
+        txn('2026-06-25', 'Salario 2da Quincena junio 2026', 6294.8, { type: 'ingreso', category: 'otros', method: 'na' }),
+      ],
+      { types: ['gasto', 'ingreso'] },
+    );
+    expect(rec).toHaveLength(2); // 1ra y 2da quincena agrupan por separado
+    expect(rec.every((r) => r.tipo === 'ingreso')).toBe(true);
+    const primera = rec.find((r) => r.descripcion.includes('1ra'))!;
+    expect(primera.montoTipico).toBe(7500);
+    expect(primera.diaTipico).toBe(15);
+  });
+
   it('ordena por monto descendente y calcula el día típico (mediana)', () => {
     const rec = detectRecurring([
       txn('2026-05-04', 'Chico', 10),
@@ -72,6 +89,7 @@ const record = (slug: string, status: RecurringRecord['status'], extra: Partial<
   slug,
   descripcion: slug,
   categoria: 'servicios',
+  tipo: "gasto" as const,
   montoTipico: 100,
   diaTipico: 10,
   status,

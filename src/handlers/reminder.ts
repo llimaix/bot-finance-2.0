@@ -1,7 +1,8 @@
 import { config } from '../lib/config';
-import { daysAgoGT, todayGT } from '../lib/dates';
+import { daysAgoGT, daysInMonth, monthPrefixGT, todayGT } from '../lib/dates';
 import { getDayState, queryRange } from '../lib/dynamo';
 import { renderWeek } from '../lib/format';
+import { guardianFindings, loadAdvisorData } from '../lib/insights';
 import { logger } from '../lib/logger';
 import { sendMessage } from '../lib/telegram';
 import type { ScheduleEvent } from '../lib/types';
@@ -14,6 +15,19 @@ const FOLLOWUP_MESSAGE =
 
 export const handler = async (event: ScheduleEvent): Promise<void> => {
   const today = todayGT();
+
+  if (event.kind === 'guardian') {
+    // Vigilancia diaria con reglas deterministas: solo habla si hay hallazgos.
+    const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
+    const findings = guardianFindings(data);
+    if (findings.length === 0) {
+      logger.info('guardián sin hallazgos', { date: today });
+      return;
+    }
+    await sendMessage(config.allowedChatId, `🛡️ <b>Guardián financiero</b>\n\n${findings.join('\n\n')}`);
+    logger.info('guardián con hallazgos', { date: today, findings: findings.length });
+    return;
+  }
 
   if (event.kind === 'weekly') {
     const txns = await queryRange(daysAgoGT(6), today);

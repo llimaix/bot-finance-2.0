@@ -63,6 +63,7 @@ const commands = [
   { command: 'nada', description: 'Registrar día sin movimientos' },
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'saldo', description: 'Saldos de tus cuentas' },
+  { command: 'proyeccion', description: 'Disponible proyectado a fin de mes' },
   { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
   { command: 'memoria', description: 'Hechos que el agente aprendió de ti' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },

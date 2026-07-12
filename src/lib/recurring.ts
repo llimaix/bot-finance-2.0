@@ -4,6 +4,7 @@ export interface RecurringPayment {
   slug: string;
   descripcion: string;
   categoria: string;
+  tipo: 'gasto' | 'ingreso';
   /** Promedio mensual de las apariciones. */
   montoTipico: number;
   /** Día del mes en que suele caer (mediana de las apariciones). */
@@ -12,12 +13,18 @@ export interface RecurringPayment {
   meses: number;
 }
 
+// Se eliminan al normalizar para que "Salario 1ra Quincena mayo 2026" y
+// "...junio 2026" agrupen como el mismo concepto.
+const MONTH_WORDS =
+  /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/g;
+
 function normalizeDesc(desc: string): string {
   return desc
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .toLowerCase()
     .replace(/[^a-z\s]/g, ' ')
+    .replace(MONTH_WORDS, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -25,6 +32,11 @@ function normalizeDesc(desc: string): string {
 /** Identificador estable de un concepto recurrente (clave del item REC#). */
 export function recurringSlug(category: string, description: string): string {
   return `${category}|${normalizeDesc(description)}`.replace(/\s/g, '-').slice(0, 48);
+}
+
+/** Clave de concepto de UNA transacción (los ingresos llevan prefijo propio). */
+export function txnRecurringKey(t: Pick<Transaction, 'type' | 'category' | 'description'>): string {
+  return `${t.type === 'ingreso' ? 'in|' : ''}${recurringSlug(t.category, t.description)}`;
 }
 
 function round2(n: number): number {
@@ -36,17 +48,30 @@ function median(values: number[]): number {
   return sorted[Math.floor((sorted.length - 1) / 2)]!;
 }
 
+export interface DetectOptions {
+  minMonths?: number;
+  /** Tipos de movimiento a considerar (default: solo gastos). */
+  types?: ReadonlyArray<'gasto' | 'ingreso'>;
+}
+
 /**
- * Detecta pagos recurrentes por heurística: mismo concepto (descripción
- * normalizada) apareciendo en 2+ meses distintos. Se calcula en código —
- * el LLM solo recibe el resultado para asesorar sobre él.
+ * Detecta conceptos recurrentes por heurística: misma descripción normalizada
+ * apareciendo en 2+ meses distintos. Cubre gastos (compromisos) y, si se pide,
+ * ingresos (salarios/quincenas). Se calcula en código — el LLM solo recibe el
+ * resultado para asesorar sobre él.
  */
-export function detectRecurring(txns: ReadonlyArray<Transaction>, minMonths = 2): RecurringPayment[] {
+export function detectRecurring(
+  txns: ReadonlyArray<Transaction>,
+  opts: DetectOptions = {},
+): RecurringPayment[] {
+  const minMonths = opts.minMonths ?? 2;
+  const types = new Set(opts.types ?? ['gasto']);
   const groups = new Map<string, { txns: Transaction[]; months: Set<string> }>();
 
   for (const t of txns) {
-    if (t.type !== 'gasto') continue;
-    const key = recurringSlug(t.category, t.description);
+    if (!types.has(t.type as 'gasto' | 'ingreso')) continue;
+    // tipo participa en la clave para no mezclar un gasto y un ingreso homónimos
+    const key = txnRecurringKey(t);
     const group = groups.get(key) ?? { txns: [], months: new Set<string>() };
     group.txns.push(t);
     group.months.add(t.date.slice(0, 7));
@@ -66,6 +91,7 @@ export function detectRecurring(txns: ReadonlyArray<Transaction>, minMonths = 2)
       slug,
       descripcion: group.txns[0]!.description,
       categoria: group.txns[0]!.category,
+      tipo: group.txns[0]!.type === 'ingreso' ? 'ingreso' : 'gasto',
       montoTipico: avg,
       diaTipico: median(group.txns.map((t) => Number(t.date.slice(8, 10)))),
       meses: group.months.size,
@@ -87,6 +113,7 @@ export function findNewCandidates(
 export interface AdvisorRecurring {
   descripcion: string;
   categoria: string;
+  tipo: 'gasto' | 'ingreso';
   montoTipico: number;
   diaTipicoDePago: number;
   estado: 'confirmado' | 'posible';
@@ -107,7 +134,7 @@ export function recurringForAdvisor(
 ): AdvisorRecurring[] {
   const byStatus = new Map(known.map((r) => [r.slug, r]));
   const paidSlugs = new Set(
-    monthTxns.filter((t) => t.type === 'gasto').map((t) => recurringSlug(t.category, t.description)),
+    monthTxns.filter((t) => t.type === 'gasto' || t.type === 'ingreso').map((t) => txnRecurringKey(t)),
   );
 
   const fromDetected: AdvisorRecurring[] = detected
@@ -119,7 +146,15 @@ export function recurringForAdvisor(
     .filter((r) => r.status === 'confirmed' && !detectedSlugs.has(r.slug))
     .map((r) =>
       toAdvisor(
-        { slug: r.slug, descripcion: r.descripcion, categoria: r.categoria, montoTipico: r.montoTipico, diaTipico: r.diaTipico, meses: 0 },
+        {
+          slug: r.slug,
+          descripcion: r.descripcion,
+          categoria: r.categoria,
+          tipo: r.tipo,
+          montoTipico: r.montoTipico,
+          diaTipico: r.diaTipico,
+          meses: 0,
+        },
         true,
         paidSlugs,
         todayDay,
@@ -139,6 +174,7 @@ function toAdvisor(
   return {
     descripcion: d.descripcion,
     categoria: d.categoria,
+    tipo: d.tipo,
     montoTipico: d.montoTipico,
     diaTipicoDePago: d.diaTipico,
     estado: confirmed ? 'confirmado' : 'posible',

@@ -110,6 +110,8 @@ export interface RecurringRecord {
   slug: string;
   descripcion: string;
   categoria: string;
+  /** gasto (compromiso que sale) o ingreso (salario/quincena que entra). */
+  tipo: 'gasto' | 'ingreso';
   montoTipico: number;
   /** Día del mes en que suele caer (mediana). */
   diaTipico: number;
@@ -136,7 +138,7 @@ export interface ConversationMessage {
   at: string;
 }
 
-export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly';
+export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly' | 'guardian';
 
 export interface ScheduleEvent {
   kind: ScheduleKind;

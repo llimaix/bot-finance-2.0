@@ -212,6 +212,8 @@ export async function listRecurring(): Promise<RecurringRecord[]> {
     slug: it.slug as string,
     descripcion: it.descripcion as string,
     categoria: it.categoria as string,
+    // items previos a la detección de ingresos no traen tipo
+    tipo: (it.tipo as RecurringRecord['tipo'] | undefined) ?? 'gasto',
     montoTipico: it.montoTipico as number,
     diaTipico: it.diaTipico as number,
     status: it.status as RecurringRecord['status'],

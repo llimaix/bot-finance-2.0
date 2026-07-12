@@ -9,6 +9,8 @@ Telegram ──webhook──▶ API Gateway (HTTP API) ──▶ Lambda webhook 
                                                     │  ├─ AI SDK (LLM_PROVIDER) → parseo/corrección/narrativa
                                                     │  └─ STT (STT_PROVIDER)    → transcripción de voz
 EventBridge Scheduler (hora de Guatemala)
+  ├─ 08:30 diario     ──▶ Lambda reminder (guardián: solo habla si hay hallazgos —
+  │                        saldos negativos, recurrentes vencidos, proyección en rojo)
   ├─ 17:00 diario     ──▶ Lambda reminder (recordatorio)
   ├─ 21:00 diario     ──▶ Lambda reminder (seguimiento solo si no respondiste)
   ├─ 20:00 domingo    ──▶ Lambda reminder (resumen semanal)
@@ -37,7 +39,8 @@ EventBridge Scheduler (hora de Guatemala)
 | ❓ (pregunta libre) | "¿Cuánto tengo?", "¿cuánto gasté en farmacias en mayo?", "¿me alcanza para una Play 5?" — el agente consulta tus datos (saldos, recurrentes, búsqueda histórica) y **asesora** con veredicto |
 | 💬 (instrucciones y hechos) | "En Banrural solo tengo 40" ajusta la cuenta; "mi salario cae el 15 y el 29" queda **aprendido para siempre** (`/memoria` para ver/olvidar) |
 | `/memoria` | Hechos que el agente aprendió de ti, con borrado por botones |
-| `/saldo` | Saldos por cuenta (banco, tarjeta, efectivo, kash) + neto líquido. Ajusta semillas: `/saldo efectivo 350` |
+| `/saldo` | Saldos por cuenta (BI, Banrural, tarjeta, efectivo, kash) + neto líquido. Ajusta semillas: `/saldo efectivo 350` |
+| `/proyeccion` | Disponible proyectado a fin de mes: neto + ingresos confirmados que faltan − compromisos pendientes − gasto variable proyectado (todo calculado en código) |
 | `/categorias` | Ver la base de conocimientos de categorías |
 | `/borrar N` | Elimina el movimiento #N de hoy (o usa el botón 🗑️ bajo cada confirmación) |
 | `corrige #N ...` | Corrige un movimiento en lenguaje natural: "corrige #2 eran Q50 con débito" |
