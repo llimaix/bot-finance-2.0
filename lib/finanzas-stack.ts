@@ -7,12 +7,16 @@ import {
   aws_apigatewayv2 as apigwv2,
   aws_apigatewayv2_integrations as integrations,
   aws_budgets as budgets,
+  aws_cloudwatch as cloudwatch,
+  aws_cloudwatch_actions as cwActions,
   aws_dynamodb as dynamodb,
   aws_iam as iam,
   aws_lambda as lambda,
   aws_lambda_nodejs as nodejs,
   aws_scheduler as scheduler,
   aws_scheduler_targets as targets,
+  aws_sns as sns,
+  aws_sns_subscriptions as snsSubs,
 } from 'aws-cdk-lib';
 import type { StackProps } from 'aws-cdk-lib';
 import type { Construct } from 'constructs';
@@ -29,6 +33,8 @@ export class FinanzasStack extends Stack {
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       timeToLiveAttribute: 'ttl',
       removalPolicy: RemovalPolicy.RETAIN,
+      // El agente puede editar/borrar: restauración a cualquier punto de 35 días.
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
     });
 
     // Los secretos llegan como env vars del proceso de synth: en CI vienen del
@@ -76,16 +82,27 @@ export class FinanzasStack extends Stack {
       });
 
     // ── Lambdas ────────────────────────────────────────────────────────────
-    const webhookFn = fn('WebhookFn', 'src/handlers/webhook.ts', {
-      // El HTTP API corta la integración a los 30s: 28s deja margen para responder el ⚠️
-      // (el agente multi-paso con Sonnet necesita hasta 20s de presupuesto propio)
-      timeout: Duration.seconds(28),
+    // Arquitectura asíncrona: el webhook valida/deduplica y responde 200 al
+    // instante; el trabajo real (agente, visión, voz) corre en el processor
+    // con 2 minutos de presupuesto — los timeouts del HTTP API dejan de existir.
+    const processorFn = fn('ProcessorFn', 'src/handlers/processor.ts', {
+      timeout: Duration.seconds(120),
       env: {
         TELEGRAM_WEBHOOK_SECRET: secrets.TELEGRAM_WEBHOOK_SECRET,
         ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY,
         MINIMAX_API_KEY: secrets.MINIMAX_API_KEY,
       },
     });
+
+    const webhookFn = fn('WebhookFn', 'src/handlers/webhook.ts', {
+      timeout: Duration.seconds(10),
+      env: {
+        TELEGRAM_WEBHOOK_SECRET: secrets.TELEGRAM_WEBHOOK_SECRET,
+        PROCESSOR_FUNCTION_NAME: '', // se fija abajo (evita referencia circular)
+      },
+    });
+    webhookFn.addEnvironment('PROCESSOR_FUNCTION_NAME', processorFn.functionName);
+    processorFn.grantInvoke(webhookFn);
 
     const reminderFn = fn('ReminderFn', 'src/handlers/reminder.ts', {
       timeout: Duration.seconds(30),
@@ -100,11 +117,12 @@ export class FinanzasStack extends Stack {
     });
 
     // ── Permisos mínimos ───────────────────────────────────────────────────
-    table.grantReadWriteData(webhookFn);
+    table.grantReadWriteData(webhookFn); // solo el item de dedupe
+    table.grantReadWriteData(processorFn);
     table.grantReadData(reminderFn);
     table.grantReadData(monthlyFn);
 
-    webhookFn.addToRolePolicy(
+    processorFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['transcribe:StartStreamTranscription'],
         // Esta acción no soporta permisos a nivel de recurso: "*" es el mínimo posible.
@@ -207,7 +225,7 @@ export class FinanzasStack extends Stack {
       ],
     });
 
-    const lambdaRoles = [webhookFn, reminderFn, monthlyFn].map((f) => f.role!);
+    const lambdaRoles = [webhookFn, processorFn, reminderFn, monthlyFn].map((f) => f.role!);
 
     const budgetActionRole = new iam.Role(this, 'BudgetActionRole', {
       assumedBy: new iam.ServicePrincipal('budgets.amazonaws.com'),
@@ -236,6 +254,28 @@ export class FinanzasStack extends Stack {
       subscribers: [{ type: 'EMAIL', address: alertEmail }],
     });
     killSwitch.node.addDependency(monthlyBudget);
+
+    // ── Alarmas: los errores ya no fallan en silencio ─────────────────────
+    const alertsTopic = new sns.Topic(this, 'AlertsTopic', {
+      displayName: 'finanzas-web alertas',
+    });
+    alertsTopic.addSubscription(new snsSubs.EmailSubscription(alertEmail));
+
+    const monitored = [
+      ['Webhook', webhookFn],
+      ['Processor', processorFn],
+      ['Reminder', reminderFn],
+      ['Monthly', monthlyFn],
+    ] as const;
+    for (const [name, f] of monitored) {
+      new cloudwatch.Alarm(this, `${name}ErrorsAlarm`, {
+        metric: f.metricErrors({ period: Duration.minutes(5) }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription: `finanzas-web: errores en la Lambda ${name}`,
+      }).addAlarmAction(new cwActions.SnsAction(alertsTopic));
+    }
 
     new CfnOutput(this, 'WebhookUrl', {
       value: `${httpApi.apiEndpoint}/webhook`,

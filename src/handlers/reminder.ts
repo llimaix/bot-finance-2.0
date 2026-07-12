@@ -31,7 +31,9 @@ export const handler = async (event: ScheduleEvent): Promise<void> => {
 
   if (event.kind === 'weekly') {
     const txns = await queryRange(daysAgoGT(6), today);
-    await sendMessage(config.allowedChatId, `📊 <b>Resumen semanal</b>\n\n${renderWeek(txns)}`);
+    const reconciliation =
+      '🧮 ¿Cuadramos? Dime cuánto efectivo real llevas y cuánto tienes en Kash para afinar tus saldos.';
+    await sendMessage(config.allowedChatId, `📊 <b>Resumen semanal</b>\n\n${renderWeek(txns)}\n\n${reconciliation}`);
     logger.info('resumen semanal enviado', { date: today, txns: txns.length });
     return;
   }

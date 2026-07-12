@@ -19,6 +19,10 @@ export const config = {
   get allowedChatId() {
     return required('ALLOWED_CHAT_ID');
   },
+  /** Nombre de la Lambda processor a la que el webhook delega (async). */
+  get processorFunctionName() {
+    return required('PROCESSOR_FUNCTION_NAME');
+  },
   // `||` y no `??`: en CI las vars no configuradas llegan como string vacío.
   get llmProvider() {
     return process.env.LLM_PROVIDER || 'anthropic';

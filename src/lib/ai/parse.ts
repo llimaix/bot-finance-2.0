@@ -16,11 +16,10 @@ import {
 import type { PromptContext } from './prompts';
 import { parseResultSchema, parsedTransactionSchema } from './schema';
 
-// Topes TOTALES por llamada (incluyen los reintentos del SDK): deben caber junto
-// con la descarga/transcripción dentro de los 25s de la Lambda webhook, dejando
-// margen para responder el ⚠️ si algo falla.
-const LLM_TIMEOUT_MS = 12_000;
-const VISION_TIMEOUT_MS = 15_000;
+// Topes TOTALES por llamada (incluyen los reintentos del SDK). Con la
+// arquitectura asíncrona corren en el processor (120s): holgados a propósito.
+const LLM_TIMEOUT_MS = 20_000;
+const VISION_TIMEOUT_MS = 30_000;
 
 /** Movimiento parseado con su fecha efectiva ya resuelta (retroactivas incluidas). */
 export interface DatedTransaction extends ParsedTransaction {

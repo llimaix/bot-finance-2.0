@@ -9,9 +9,9 @@ const client = new TranscribeStreamingClient({});
 
 const CHUNK_SIZE = 4 * 1024;
 
-// Una nota de voz corta transcribe en 2-5s; el tope evita comerse el budget
-// de 25s de la Lambda webhook si Transcribe se atasca.
-const TIMEOUT_MS = 8_000;
+// Con la arquitectura asíncrona (processor 120s) hay espacio para notas de voz
+// largas; el tope solo evita colgarse si Transcribe se atasca.
+const TIMEOUT_MS = 25_000;
 
 /**
  * Amazon Transcribe en modo STREAMING: acepta ogg-opus (el formato exacto de

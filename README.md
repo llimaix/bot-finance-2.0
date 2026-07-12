@@ -5,9 +5,14 @@ Bot de Telegram para registrar finanzas personales (quetzales, GTQ) con mínima 
 ## Arquitectura
 
 ```
-Telegram ──webhook──▶ API Gateway (HTTP API) ──▶ Lambda webhook ──▶ DynamoDB (single-table)
-                                                    │  ├─ AI SDK (LLM_PROVIDER) → parseo/corrección/narrativa
-                                                    │  └─ STT (STT_PROVIDER)    → transcripción de voz
+Telegram ──webhook──▶ API Gateway ──▶ Lambda webhook (fina, 10s: valida/dedupe/filtra)
+                                          │ invoca async
+                                          ▼
+                                      Lambda processor (120s) ──▶ DynamoDB (single-table)
+                                          ├─ Agente con herramientas (LLM_MODEL_AGENT) → registrar,
+                                          │   consultar, corregir, borrar, ajustar cuentas, recordar hechos
+                                          ├─ AI SDK (LLM_PROVIDER) → visión de tickets/corrección/narrativa
+                                          └─ STT (STT_PROVIDER)   → transcripción de voz
 EventBridge Scheduler (hora de Guatemala)
   ├─ 08:30 diario     ──▶ Lambda reminder (guardián: solo habla si hay hallazgos —
   │                        saldos negativos, recurrentes vencidos, proyección en rojo)
@@ -18,9 +23,11 @@ EventBridge Scheduler (hora de Guatemala)
 ```
 
 - **Stack**: Node.js 24 + TypeScript, AWS CDK v2, pnpm, Vitest.
-- **IA agnóstica de proveedor**: [Vercel AI SDK](https://ai-sdk.dev). Hoy usa Claude (`claude-haiku-4-5`); cambiar a OpenAI/MiniMax/Google es instalar el provider y cambiar env vars (ver abajo).
+- **IA agnóstica de proveedor**: [Vercel AI SDK](https://ai-sdk.dev). Dos modelos por propósito: `LLM_MODEL` (`claude-haiku-4-5`) para visión/correcciones/narrativa y `LLM_MODEL_AGENT` (`claude-sonnet-5`) para el loop del agente. Cambiar a OpenAI/MiniMax/Google es instalar el provider y cambiar env vars (ver abajo).
 - **Voz**: Amazon Transcribe **streaming** (`ogg-opus` directo, español `es-US`) — sin S3, detrás de un puerto intercambiable (`src/lib/stt/`).
+- **Webhook asíncrono**: la Lambda del webhook responde a Telegram en milisegundos y delega el trabajo pesado (IA, visión, voz) a una Lambda processor con 120s de margen — sin timeouts de cara a Telegram.
 - **Deploy**: automático con GitHub Actions en cada push a `main` (environment `production` + OIDC, sin access keys).
+- **Resiliencia**: tabla con Point-in-Time Recovery (restaurable a cualquier segundo de los últimos 35 días) y alarmas de errores por Lambda → correo vía SNS.
 - **Costo**: free tier / centavos al mes (DynamoDB on-demand, Lambdas arm64, sin recursos provisioned).
 
 ## Comandos del bot
@@ -111,7 +118,10 @@ pnpm install
 pnpm typecheck        # TypeScript estricto
 pnpm test             # vitest (lógica pura: fechas, comandos, agregados, schema, formato)
 pnpm synth            # sintetiza la infraestructura sin deployar
+ANTHROPIC_API_KEY=sk-... pnpm tsx scripts/eval-agent.ts   # eval GOLDEN del agente contra el modelo real
 ```
+
+El eval golden (`scripts/eval-agent.ts`) contiene casos reales salidos de conversaciones de producción — incluidos los que alguna vez fallaron — y valida qué herramientas llama el agente. Córrelo antes de deployar cambios de prompts o herramientas.
 
 Deploy manual de emergencia (mismo efecto que el workflow):
 
@@ -125,13 +135,14 @@ pnpm set-webhook
 ## Estructura
 
 ```
-bin/, lib/           # CDK: app, FinanzasStack (tabla, lambdas, HTTP API, schedules), GithubOidcStack
-src/handlers/        # webhook, reminder, monthly-report
-src/lib/ai/          # AI SDK: factory de modelo, schema zod, prompts, parseo/corrección/narrativa
+bin/, lib/           # CDK: app, FinanzasStack (tabla, lambdas, HTTP API, schedules, alarmas, budget), GithubOidcStack
+src/handlers/        # webhook (fino), processor (toda la lógica, async), reminder, monthly-report
+src/lib/processing.ts# ruteo y orquestación del bot: agente, fotos, comandos, correcciones, memoria
+src/lib/ai/          # AI SDK: factory de modelos, agente con herramientas, schema zod, prompts, parseo/visión
 src/lib/stt/         # puerto de transcripción + adapter Transcribe streaming
-src/lib/             # dynamo, telegram, fechas GT, formato, comandos, agregados, reporte
+src/lib/             # dynamo, telegram, fechas GT, formato, comandos, saldos, recurrentes, proyección, guardián
 test/                # vitest de la lógica pura
-scripts/             # set-webhook.mjs (lo corre el workflow en cada deploy)
+scripts/             # set-webhook.mjs, eval-agent.ts (eval golden), ingest.ts (ingesta de estados de cuenta)
 .github/workflows/   # deploy.yml (CI + deploy con OIDC)
 ```
 
@@ -152,9 +163,12 @@ Las categorías **no son un catálogo fijo**: viven en DynamoDB como items `CAT#
 | Cuenta (saldos) | `USER#allan` | `ACC#<id>` | name, emoji, seedBalance, asOf, estimated — el saldo actual se calcula en lectura: semilla + deltas de movimientos posteriores a asOf (sin drift) |
 | Categoría | `USER#allan` | `CAT#<nombre>` | name, emoji, source (`seed`/`auto`), createdAt |
 | Estado del día | `USER#allan` | `DAY#<fecha>` | reported, lastShortId (contador atómico de shortIds) |
+| Recurrente | `USER#allan` | `REC#<slug>` | descripción, categoría, tipo (gasto/ingreso), montoTipico, diaTipico, estado (candidato/confirmado/rechazado) |
+| Hecho aprendido | `USER#allan` | `FACT#<id>` | texto que el usuario le enseñó al agente ("mi salario cae el 15 y el 29") |
+| Conversación | `USER#allan` | `CONV#main` | últimos 12 intercambios (memoria de corto plazo del agente), ttl 72h |
 | Dedupe de updates | `USER#allan` | `UPDATE#<update_id>` | ttl (48h) |
 
-Consultas por prefijo de SK (`begins_with(SK, "TXN#2026-07")`) — sin GSI.
+Consultas por prefijo de SK (`begins_with(SK, "TXN#2026-07")`) — sin GSI. La tabla tiene **PITR** habilitado (backup continuo, 35 días).
 
 ## Guardas de costos 💸
 
@@ -164,15 +178,19 @@ El stack incluye un presupuesto mensual de **$10 USD** sobre toda la cuenta (AWS
 |---|---|
 | $5 (50%) | Correo de aviso |
 | $8 (80%) | Correo de alerta temprana |
-| $10 (100%) | Correo + **kill switch automático**: se adjunta una política DENY-all a los roles de las 3 Lambdas y el bot deja de operar |
+| $10 (100%) | Correo + **kill switch automático**: se adjunta una política DENY-all a los roles de las 4 Lambdas y el bot deja de operar |
 
 - El correo de alertas es `asanchezrixtun@gmail.com` (cambiable con la variable `BILLING_ALERT_EMAIL` del environment).
 - ⚠️ La facturación de AWS se actualiza con **horas de retraso** — el corte no es en tiempo real. A la escala de este stack el exceso posible es de centavos, pero AWS no ofrece un tope duro instantáneo.
 - El gasto de la **API de Anthropic no pasa por AWS**: su tope natural es el crédito prepagado que cargaste en console.anthropic.com (al agotarse, simplemente deja de responder).
 
 **Para re-armar el bot después del kill switch** (nuevo ciclo de facturación o falsa alarma):
-1. IAM → Roles → busca los 3 roles `FinanzasStack-*Fn*` → pestaña Permissions → **detach** de la política `KillSwitchPolicy`.
+1. IAM → Roles → busca los 4 roles `FinanzasStack-*Fn*` → pestaña Permissions → **detach** de la política `KillSwitchPolicy`.
 2. Billing → Budgets → `finanzas-web-mensual` → Actions → **Reset** la acción para que quede armada de nuevo.
+
+## Alarmas de errores 🔔
+
+Cada Lambda tiene una alarma de CloudWatch (`Errors ≥ 1` en 5 minutos) que publica a un tópico SNS con suscripción de correo (`BILLING_ALERT_EMAIL`). Si el bot falla en silencio — un update que explota, un schedule que no corre — te llega un correo con el nombre de la función. **La primera vez, SNS envía un correo "Confirm subscription" que hay que aceptar** para empezar a recibir alertas.
 
 ## Notas de seguridad
 
