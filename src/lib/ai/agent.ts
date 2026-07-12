@@ -8,9 +8,9 @@ import { getAgentModel } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
 import { newCategorySchema, parsedTransactionSchema } from './schema';
 
-// Tope TOTAL del loop del agente (varios pasos LLM + herramientas). Debe caber
-// con la transcripción de voz dentro de los 25s de la Lambda webhook.
-const AGENT_TIMEOUT_MS = 15_000;
+// Tope TOTAL por defecto del loop del agente (varios pasos LLM + herramientas).
+// El webhook lo ajusta según la vía: texto (más holgado) vs voz (ya gastó en transcribir).
+const DEFAULT_AGENT_TIMEOUT_MS = 20_000;
 
 export interface RegisteredBatch {
   txns: Transaction[];
@@ -58,6 +58,7 @@ export async function runAgent(
   userText: string,
   history: ConversationMessage[],
   deps: AgentDeps,
+  opts: { timeoutMs?: number } = {},
 ): Promise<AgentResult> {
   const registered: Transaction[] = [];
 
@@ -147,7 +148,7 @@ export async function runAgent(
     },
     stopWhen: stepCountIs(5),
     temperature: 0,
-    timeout: AGENT_TIMEOUT_MS,
+    timeout: opts.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
   });
 
   const text = result.text.trim() || (registered.length > 0 ? '✅ Registrado.' : '🤔 No supe qué hacer con eso, ¿me lo repites?');

@@ -77,8 +77,9 @@ export class FinanzasStack extends Stack {
 
     // ── Lambdas ────────────────────────────────────────────────────────────
     const webhookFn = fn('WebhookFn', 'src/handlers/webhook.ts', {
-      // El HTTP API corta la integración a los 30s: 25s deja margen para responder el ⚠️
-      timeout: Duration.seconds(25),
+      // El HTTP API corta la integración a los 30s: 28s deja margen para responder el ⚠️
+      // (el agente multi-paso con Sonnet necesita hasta 20s de presupuesto propio)
+      timeout: Duration.seconds(28),
       env: {
         TELEGRAM_WEBHOOK_SECRET: secrets.TELEGRAM_WEBHOOK_SECRET,
         ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY,

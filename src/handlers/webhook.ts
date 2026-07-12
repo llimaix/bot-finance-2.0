@@ -52,7 +52,7 @@ import {
 import { logger } from '../lib/logger';
 import { buildReport } from '../lib/report';
 import { getSttProvider } from '../lib/stt';
-import { answerCallbackQuery, getFileBuffer, sendDocument, sendMessage } from '../lib/telegram';
+import { answerCallbackQuery, getFileBuffer, sendDocument, sendMessage, sendTyping } from '../lib/telegram';
 import type {
   InlineKeyboardButton,
   TelegramCallbackQuery,
@@ -181,6 +181,7 @@ async function route(message: TelegramMessage): Promise<void> {
 // ── Agente conversacional (texto y voz) ────────────────────────────────────
 
 async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {
+  await sendTyping(chatId);
   const [history, balances, cats, facts] = await Promise.all([
     getConversation(),
     loadBalances(today),
@@ -248,7 +249,8 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     },
   };
 
-  const result = await runAgent(userText, history, deps);
+  // Presupuesto: la voz ya gastó ~8s transcribiendo; el texto tiene más margen.
+  const result = await runAgent(userText, history, deps, { timeoutMs: transcript ? 13_000 : 20_000 });
 
   const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
   let reply = `${heard}${escapeHtml(result.text)}`;

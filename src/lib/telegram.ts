@@ -87,6 +87,11 @@ export async function sendMessage(
   });
 }
 
+/** Muestra "escribiendo..." mientras el agente piensa (efímero, ~5s). */
+export async function sendTyping(chatId: string | number): Promise<void> {
+  await call('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => undefined);
+}
+
 /** Cierra el "spinner" del botón inline; el texto aparece como toast. */
 export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
   await call('answerCallbackQuery', { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
