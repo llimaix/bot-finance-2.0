@@ -14,6 +14,7 @@ import { logger } from './logger';
 import { SEED_CATEGORIES } from './types';
 import type {
   Account,
+  BudgetRecord,
   CategoryRecord,
   ConversationMessage,
   Fact,
@@ -246,6 +247,42 @@ export async function putRecurring(record: RecurringRecord): Promise<void> {
     }),
   );
   logger.info('recurrente actualizado', { slug: record.slug, status: record.status });
+}
+
+// ── Metas de gasto por categoría (items BUD#<categoria>) ──────────────────
+
+export async function listBudgets(): Promise<BudgetRecord[]> {
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: config.tableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'BUD#' },
+    }),
+  );
+  return (res.Items ?? []).map((it) => ({
+    category: it.category as string,
+    monthlyLimit: it.monthlyLimit as number,
+    source: it.source as BudgetRecord['source'],
+    createdAt: it.createdAt as string,
+    updatedAt: it.updatedAt as string,
+  }));
+}
+
+export async function putBudget(budget: BudgetRecord): Promise<void> {
+  await doc.send(
+    new PutCommand({
+      TableName: config.tableName,
+      Item: { PK, SK: `BUD#${budget.category}`, ...budget },
+    }),
+  );
+  logger.info('meta actualizada', { category: budget.category, monthlyLimit: budget.monthlyLimit });
+}
+
+export async function deleteBudget(category: string): Promise<void> {
+  await doc.send(
+    new DeleteCommand({ TableName: config.tableName, Key: { PK, SK: `BUD#${category}` } }),
+  );
+  logger.info('meta eliminada', { category });
 }
 
 // ── Cuentas (modelo de saldos, items ACC#<id>) ─────────────────────────────

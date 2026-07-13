@@ -3,8 +3,9 @@
  * de Allan (incluidos los que fallaron en producción). Corre contra el modelo
  * real con dependencias simuladas en memoria y valida qué herramientas llama.
  *
- * Uso:  ANTHROPIC_API_KEY=sk-... pnpm tsx scripts/eval-agent.ts
- * (correrlo antes de deployar cambios de prompts/herramientas)
+ * Uso:  ANTHROPIC_API_KEY=sk-... pnpm tsx scripts/eval-agent.ts [filtro] [--times N]
+ * (correrlo antes de deployar cambios de prompts/herramientas; el filtro corre
+ * solo los casos cuyo nombre lo contenga, N veces — para medir estabilidad)
  */
 import { runAgent } from '../src/lib/ai/agent';
 import type { AgentDeps } from '../src/lib/ai/agent';
@@ -44,6 +45,12 @@ const CASES: GoldenCase[] = [
     user: 'Pongámonos en orden con lo de ayer: esos dos retiros de mil que ya tenés anotados, uno fue para prestarle a mamá y el otro para la salida con amigos. Solo quiero cuadrar, ¿cómo me quedó el efectivo?',
     expectTools: ['consultar_datos'],
     forbidTools: ['registrar_movimientos'],
+  },
+  {
+    name: 'meta de gasto por chat',
+    user: 'ponme una meta de 1500 al mes en comida',
+    expectTools: ['fijar_meta'],
+    forbidTools: ['registrar_movimientos', 'recordar_dato'],
   },
 ];
 
@@ -125,6 +132,8 @@ function buildDeps(called: string[]): AgentDeps {
     correctMovement: async ({ numero }) =>
       track('corregir_movimiento', { ok: true, antes: { metodo: 'credito' }, ahora: { metodo: 'debito' }, numero }),
     deleteMovement: async ({ numero }) => track('eliminar_movimiento', { ok: true, eliminado: { numero } }),
+    setBudget: async ({ categoria, topeMensual }) =>
+      track('fijar_meta', { ok: true, meta: { categoria, topeMensual } }),
     searchMovements: async () =>
       track('buscar_movimientos', {
         rango: { desde: '2026-05-01', hasta: '2026-05-31' },
@@ -141,8 +150,16 @@ function buildDeps(called: string[]): AgentDeps {
 }
 
 async function main() {
+  const args = process.argv.slice(2);
+  const timesIdx = args.indexOf('--times');
+  const times = timesIdx >= 0 ? Number.parseInt(args[timesIdx + 1] ?? '1', 10) : 1;
+  const filter = args.filter((a, i) => a !== '--times' && i !== timesIdx + 1)[0];
+
+  const selected = filter ? CASES.filter((c) => c.name.includes(filter)) : CASES;
+  const runs = Array.from({ length: Math.max(1, times) }, () => selected).flat();
+
   let failures = 0;
-  for (const c of CASES) {
+  for (const c of runs) {
     const called: string[] = [];
     let reply = '';
     let error: string | null = null;
@@ -166,7 +183,7 @@ async function main() {
     console.log(`   respuesta: ${reply.slice(0, 140).replaceAll('\n', ' ')}`);
   }
 
-  console.log(`\n${CASES.length - failures}/${CASES.length} casos OK`);
+  console.log(`\n${runs.length - failures}/${runs.length} casos OK`);
   if (failures > 0) process.exit(1);
 }
 

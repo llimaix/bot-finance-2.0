@@ -40,4 +40,47 @@ describe('registrationWarnings', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('Monto grande');
   });
+
+  it('incidente 11-jul: mismo monto + descripción similar avisa aunque cambie la categoría', () => {
+    const existente = txn({
+      sk: 'TXN#2026-07-11#viejo',
+      date: '2026-07-11',
+      shortId: 1,
+      amount: 1000,
+      type: 'transferencia',
+      category: 'deuda',
+      description: 'Préstamo entregado a mamá',
+    });
+    const duplicado = txn({
+      date: '2026-07-11',
+      shortId: 7,
+      amount: 1000,
+      category: 'prestamo',
+      description: 'Prestamo a mama',
+    });
+    const warnings = registrationWarnings([duplicado], [existente, duplicado]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Posible duplicado');
+  });
+
+  it('mismo monto con conceptos distintos NO acusa (dos gastos legítimos de Q100)', () => {
+    const cerveza = txn({
+      sk: 'TXN#2026-07-11#a',
+      date: '2026-07-11',
+      shortId: 6,
+      amount: 100,
+      category: 'entretenimiento',
+      description: 'Cerveza para compartir con la novia',
+    });
+    const cena = txn({
+      date: '2026-07-11',
+      shortId: 8,
+      amount: 100,
+      category: 'comida',
+      description: 'Cena con novia',
+    });
+    // "cerveza compartir novia" vs "cena novia": similitud baja → sin aviso
+    const warnings = registrationWarnings([cena], [cerveza, cena]);
+    expect(warnings).toHaveLength(0);
+  });
 });

@@ -15,10 +15,12 @@ Telegram ──webhook──▶ API Gateway ──▶ Lambda webhook (fina, 10s:
                                           └─ STT (STT_PROVIDER)   → transcripción de voz
 EventBridge Scheduler (hora de Guatemala)
   ├─ 08:30 diario     ──▶ Lambda reminder (guardián: solo habla si hay hallazgos —
-  │                        saldos negativos, recurrentes vencidos, proyección en rojo)
+  │                        saldos negativos, recurrentes vencidos, proyección en rojo,
+  │                        metas de gasto reventadas)
   ├─ 17:00 diario     ──▶ Lambda reminder (recordatorio)
   ├─ 21:00 diario     ──▶ Lambda reminder (seguimiento solo si no respondiste)
-  ├─ 20:00 domingo    ──▶ Lambda reminder (resumen semanal)
+  ├─ 20:00 domingo    ──▶ Lambda reminder (resumen semanal + COACH: análisis y consejos)
+  ├─ 08:00 día 14 y 28──▶ Lambda reminder (plan de quincena: cuánto apartar antes del pago)
   └─ 08:00 día 1      ──▶ Lambda monthly-report (reporte del mes cerrado)
 ```
 
@@ -48,11 +50,14 @@ EventBridge Scheduler (hora de Guatemala)
 | `/memoria` | Hechos que el agente aprendió de ti, con borrado por botones |
 | `/saldo` | Saldos por cuenta (BI, Banrural, tarjeta, efectivo, kash) + neto líquido. Ajusta semillas: `/saldo efectivo 350` |
 | `/proyeccion` | Disponible proyectado a fin de mes: neto + ingresos confirmados que faltan − compromisos pendientes − gasto variable proyectado (todo calculado en código) |
+| `/metas` | Metas de gasto por categoría con semáforo 🟢🟡🔴. `/metas sugerir` propone topes desde tu historial (confirmas por botones); `/metas comida 1500` fija directo; también por chat: "ponme meta de Q1,500 en comida" |
 | `/categorias` | Ver la base de conocimientos de categorías |
 | `/borrar N` | Elimina el movimiento #N de hoy (o usa el botón 🗑️ bajo cada confirmación) |
 | `corrige #N ...` | Corrige un movimiento en lenguaje natural: "corrige #2 eran Q50 con débito" |
 
-Cada confirmación trae **botones inline** `🗑️ #N` para borrar al toque, y los domingos a las 20:00 llega un **resumen semanal** automático.
+Cada confirmación trae **botones inline** `🗑️ #N` para borrar al toque.
+
+**Coach proactivo**: los domingos 20:00 llega el resumen semanal con análisis del coach (qué cambió vs la semana pasada, cómo va el mes y 2-3 acciones concretas); los días 14 y 28 a las 08:00 —víspera de las quincenas— llega el **plan de quincena** (cuánto apartar para compromisos + colchón antes de gastar). Los números se calculan en código; el LLM solo redacta el consejo.
 
 ## Setup inicial (una sola vez)
 
@@ -164,6 +169,7 @@ Las categorías **no son un catálogo fijo**: viven en DynamoDB como items `CAT#
 | Categoría | `USER#allan` | `CAT#<nombre>` | name, emoji, source (`seed`/`auto`), createdAt |
 | Estado del día | `USER#allan` | `DAY#<fecha>` | reported, lastShortId (contador atómico de shortIds) |
 | Recurrente | `USER#allan` | `REC#<slug>` | descripción, categoría, tipo (gasto/ingreso), montoTipico, diaTipico, estado (candidato/confirmado/rechazado) |
+| Meta de gasto | `USER#allan` | `BUD#<categoria>` | monthlyLimit (tope mensual), source (auto/user) — el avance se calcula en lectura contra el mes |
 | Hecho aprendido | `USER#allan` | `FACT#<id>` | texto que el usuario le enseñó al agente ("mi salario cae el 15 y el 29") |
 | Conversación | `USER#allan` | `CONV#main` | últimos 12 intercambios (memoria de corto plazo del agente), ttl 72h |
 | Dedupe de updates | `USER#allan` | `UPDATE#<update_id>` | ttl (48h) |

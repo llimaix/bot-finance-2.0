@@ -104,8 +104,13 @@ export class FinanzasStack extends Stack {
     webhookFn.addEnvironment('PROCESSOR_FUNCTION_NAME', processorFn.functionName);
     processorFn.grantInvoke(webhookFn);
 
+    // El reminder también llama al LLM (coach semanal y plan de quincena).
     const reminderFn = fn('ReminderFn', 'src/handlers/reminder.ts', {
-      timeout: Duration.seconds(30),
+      timeout: Duration.seconds(60),
+      env: {
+        ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY,
+        MINIMAX_API_KEY: secrets.MINIMAX_API_KEY,
+      },
     });
 
     const monthlyFn = fn('MonthlyReportFn', 'src/handlers/monthly-report.ts', {
@@ -175,6 +180,15 @@ export class FinanzasStack extends Stack {
         retryAttempts: 2,
       }),
       description: 'Resumen semanal domingo 20:00 GT',
+    });
+
+    new scheduler.Schedule(this, 'PaydayCheckpoint', {
+      schedule: scheduler.ScheduleExpression.cron({ minute: '0', hour: '8', day: '14,28', timeZone: GT }),
+      target: new targets.LambdaInvoke(reminderFn, {
+        input: scheduler.ScheduleTargetInput.fromObject({ kind: 'payday' }),
+        retryAttempts: 2,
+      }),
+      description: 'Plan de quincena día 14 y 28, 08:00 GT (víspera de los pagos del 15 y 29)',
     });
 
     new scheduler.Schedule(this, 'MonthlyReport', {

@@ -4,6 +4,7 @@ import type { AgentDeps } from './ai/agent';
 import { answerQuestion, correctTransaction, materializeParsed, parseReceipt } from './ai/parse';
 import type { ParseOutcome } from './ai/parse';
 import { DEFAULT_ACCOUNTS, renderSaldos } from './accounts';
+import { renderMetas, suggestBudgets } from './budgets';
 import { resolveCategory } from './categories';
 import { computeAggregates } from './aggregates';
 import { registrationWarnings } from './guards';
@@ -16,6 +17,7 @@ import type { Command } from './commands';
 import { daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from './dates';
 import {
   appendConversation,
+  deleteBudget,
   deleteFact,
   deleteTransaction,
   findByShortId,
@@ -23,9 +25,11 @@ import {
   getLastRecurringAskAt,
   getOrSeedAccounts,
   getTransaction,
+  listBudgets,
   listCategories,
   listFacts,
   listRecurring,
+  putBudget,
   putFact,
   markReported,
   markReportedAndReserveShortIds,
@@ -292,6 +296,18 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       const txns = await queryRange(from, to);
       return { rango: { desde: from, hasta: to }, ...summarizeSearch(txns, { categoria, texto }) };
     },
+    setBudget: async ({ categoria, topeMensual }) => {
+      const category = categoria.trim().toLowerCase();
+      if (topeMensual === null) {
+        const existing = (await listBudgets()).find((b) => b.category === category);
+        if (!existing) return { ok: false, error: `No hay meta en "${category}"` };
+        await deleteBudget(category);
+        return { ok: true, metaEliminada: category };
+      }
+      const now = new Date().toISOString();
+      await putBudget({ category, monthlyLimit: topeMensual, source: 'user', createdAt: now, updatedAt: now });
+      return { ok: true, meta: { categoria: category, topeMensual } };
+    },
   };
 
   // Con la arquitectura asíncrona el presupuesto es holgado (processor: 120s).
@@ -545,6 +561,14 @@ async function buildSnapshot(today: string) {
     netoLiquido: data.netoLiquido,
     recurrentes: data.recurrentes.slice(0, 15),
     proyeccionFinDeMes: data.proyeccion,
+    metasDeGasto: data.metas.map((m) => ({
+      categoria: m.category,
+      topeMensual: m.monthlyLimit,
+      gastadoEsteMes: m.spent,
+      porcentaje: m.pct,
+      ritmoProyectado: m.paceProjected,
+      estado: m.status,
+    })),
     mesActual: summarizePeriod(
       `${monthLabelES(month)} (al día ${data.daysElapsed})`,
       data.monthTxns,
@@ -596,6 +620,30 @@ async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
         ? `✅ Aprendido: <b>${escapeHtml(record.descripcion)}</b> (~${formatQ(record.montoTipico)}/mes, día ~${record.diaTipico}) ya cuenta como recurrente en tus análisis.`
         : `👍 Anotado: <b>${escapeHtml(record.descripcion)}</b> no es recurrente. No te lo vuelvo a preguntar.`,
     );
+    return;
+  }
+
+  // Respuesta a "¿te pongo esta meta?": bgt:y:<categoria>:<monto> / bgt:n:<categoria>
+  if (data.startsWith('bgt:')) {
+    if (data.startsWith('bgt:y:')) {
+      const [category, rawAmount] = data.slice(6).split(':');
+      const amount = Number.parseFloat(rawAmount ?? '');
+      if (!category || !Number.isFinite(amount) || amount <= 0) {
+        await answerCallbackQuery(callback.id, 'Meta inválida');
+        return;
+      }
+      const now = new Date().toISOString();
+      await putBudget({ category, monthlyLimit: amount, source: 'auto', createdAt: now, updatedAt: now });
+      await answerCallbackQuery(callback.id, 'Meta fijada 🎯');
+      await sendMessage(
+        chatId,
+        `🎯 Meta fijada: <b>${escapeHtml(category)}</b> ≤ ${formatQ(amount)}/mes. Sigue tu avance con /metas.`,
+      );
+    } else {
+      const category = data.slice(6);
+      await answerCallbackQuery(callback.id, 'Anotado, sin meta');
+      await sendMessage(chatId, `👍 Sin meta en ${escapeHtml(category)}. Puedes ponerla luego con /metas ${escapeHtml(category)} <monto>.`);
+    }
     return;
   }
 
@@ -745,6 +793,81 @@ async function handleCommand(chatId: number, today: string, command: Command): P
     case 'proyeccion': {
       const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
       await sendMessage(chatId, renderProjection(data));
+      return;
+    }
+
+    case 'metas': {
+      if (command.invalidArgs) {
+        await sendMessage(
+          chatId,
+          'Uso: /metas — ver progreso · /metas sugerir — propuestas según tu historial · /metas comida 1500 — fijar · /metas quitar comida',
+        );
+        return;
+      }
+      const action = command.action;
+
+      if (action.op === 'fijar') {
+        const now = new Date().toISOString();
+        await putBudget({
+          category: action.category,
+          monthlyLimit: action.amount,
+          source: 'user',
+          createdAt: now,
+          updatedAt: now,
+        });
+        await sendMessage(chatId, `🎯 Meta fijada: ${escapeHtml(action.category)} ≤ ${formatQ(action.amount)}/mes.`);
+        return;
+      }
+
+      if (action.op === 'quitar') {
+        const existing = (await listBudgets()).find((b) => b.category === action.category);
+        if (!existing) {
+          await sendMessage(chatId, `No tienes meta en "${escapeHtml(action.category)}". Mira /metas.`);
+          return;
+        }
+        await deleteBudget(action.category);
+        await sendMessage(chatId, `🗑️ Meta de ${escapeHtml(action.category)} eliminada.`);
+        return;
+      }
+
+      if (action.op === 'sugerir') {
+        const [prevTxns, prev2Txns, budgets, recurring] = await Promise.all([
+          queryMonth(monthPrefixGT(-1)),
+          queryMonth(monthPrefixGT(-2)),
+          listBudgets(),
+          listRecurring(),
+        ]);
+        const suggestions = suggestBudgets(
+          [prevTxns, prev2Txns],
+          budgets,
+          recurring.filter((r) => r.status === 'confirmed'),
+        );
+        if (suggestions.length === 0) {
+          await sendMessage(
+            chatId,
+            '🤷 No tengo suficiente historial (o ya tienes metas en tus categorías fuertes). Fija una directo: /metas comida 1500',
+          );
+          return;
+        }
+        for (const s of suggestions) {
+          await sendMessage(
+            chatId,
+            `🎯 En <b>${escapeHtml(s.category)}</b> vienes gastando ~${formatQ(s.monthlyAverage)}/mes. ¿Te pongo meta de <b>${formatQ(s.suggested)}</b>?`,
+            {
+              keyboard: [
+                [
+                  { text: '✅ Sí, esa meta', callback_data: `bgt:y:${s.category}:${s.suggested}` },
+                  { text: '❌ No', callback_data: `bgt:n:${s.category}` },
+                ],
+              ],
+            },
+          );
+        }
+        return;
+      }
+
+      const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
+      await sendMessage(chatId, renderMetas(data.metas, data.daysElapsed));
       return;
     }
 

@@ -58,6 +58,28 @@ describe('matchCommand', () => {
     expect(matchCommand('/saldo efectivo abc')).toEqual({ kind: 'saldo', set: null, invalidArgs: true });
   });
 
+  it('/metas: ver, sugerir, fijar, quitar e inválidos', () => {
+    expect(matchCommand('/metas')).toEqual({ kind: 'metas', action: { op: 'ver' }, invalidArgs: false });
+    expect(matchCommand('/metas sugerir')).toEqual({ kind: 'metas', action: { op: 'sugerir' }, invalidArgs: false });
+    expect(matchCommand('/metas comida 1500')).toEqual({
+      kind: 'metas',
+      action: { op: 'fijar', category: 'comida', amount: 1500 },
+      invalidArgs: false,
+    });
+    expect(matchCommand('/metas Comida 1,500.50')).toEqual({
+      kind: 'metas',
+      action: { op: 'fijar', category: 'comida', amount: 1500.5 },
+      invalidArgs: false,
+    });
+    expect(matchCommand('/metas quitar comida')).toEqual({
+      kind: 'metas',
+      action: { op: 'quitar', category: 'comida' },
+      invalidArgs: false,
+    });
+    expect(matchCommand('/metas comida')).toEqual({ kind: 'metas', action: { op: 'ver' }, invalidArgs: true });
+    expect(matchCommand('/metas comida -50')).toEqual({ kind: 'metas', action: { op: 'ver' }, invalidArgs: true });
+  });
+
   it('start/help/ayuda → ayuda', () => {
     expect(matchCommand('/start')).toEqual({ kind: 'ayuda' });
     expect(matchCommand('/help')).toEqual({ kind: 'ayuda' });

@@ -4,11 +4,38 @@ import type { Transaction } from './types';
 /** Aviso de montos inusualmente grandes (posible dedazo o mala transcripción). */
 const BIG_AMOUNT_THRESHOLD = 10_000;
 
+const STOPWORDS = new Set(['con', 'para', 'por', 'del', 'los', 'las', 'una', 'unos', 'unas', 'que', 'mis']);
+
+/** Tokens de una descripción, sin tildes ni ruido, para comparar conceptos. */
+function descTokens(desc: string): Set<string> {
+  return new Set(
+    desc
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w)),
+  );
+}
+
+/** Similitud Jaccard entre descripciones (0-1). */
+function descSimilarity(a: string, b: string): number {
+  const ta = descTokens(a);
+  const tb = descTokens(b);
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let inter = 0;
+  for (const w of ta) if (tb.has(w)) inter += 1;
+  return inter / (ta.size + tb.size - inter);
+}
+
 /**
- * Escudos al registrar: detecta posibles duplicados (misma fecha + monto +
- * categoría que un movimiento ya existente) y montos sospechosamente grandes.
- * Devuelve advertencias para anexar a la respuesta — nunca bloquea el registro
- * (el botón 🗑️ queda a un toque si era duplicado).
+ * Escudos al registrar: detecta posibles duplicados y montos sospechosos.
+ * Un duplicado es misma fecha + mismo monto + (misma categoría O descripción
+ * similar) — la categoría sola no basta: el incidente del 11-jul duplicó un
+ * préstamo cambiándole la categoría (deuda → prestamo). Devuelve advertencias
+ * para anexar a la respuesta — nunca bloquea el registro (el botón 🗑️ queda
+ * a un toque si era duplicado).
  */
 export function registrationWarnings(
   newTxns: ReadonlyArray<Transaction>,
@@ -23,7 +50,7 @@ export function registrationWarnings(
         !newSks.has(e.sk) &&
         e.date === txn.date &&
         e.amount === txn.amount &&
-        e.category === txn.category,
+        (e.category === txn.category || descSimilarity(e.description, txn.description) >= 0.5),
     );
     if (dup) {
       warnings.push(

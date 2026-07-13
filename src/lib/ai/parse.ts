@@ -5,9 +5,11 @@ import { normalizeParsedDate, todayGT, weekdayGT } from '../dates';
 import { getOrSeedCategories } from '../dynamo';
 import { logger } from '../logger';
 import type { CategoryRecord, ParsedTransaction, Transaction } from '../types';
-import { getModel } from './llm';
+import { getAgentModel, getModel } from './llm';
 import {
   ANSWER_SYSTEM_PROMPT,
+  COACH_PAYDAY_SYSTEM_PROMPT,
+  COACH_WEEKLY_SYSTEM_PROMPT,
   NARRATE_SYSTEM_PROMPT,
   buildCorrectSystemPrompt,
   buildParseSystemPrompt,
@@ -217,6 +219,21 @@ export async function answerQuestion(question: string, snapshot: unknown): Promi
     temperature: 0,
     timeout: LLM_TIMEOUT_MS,
     maxOutputTokens: 400,
+  });
+  return result.text.trim();
+}
+
+/**
+ * Consejo del coach (semanal o de quincena) sobre insumos YA calculados en
+ * código. Usa el modelo del agente: es donde la calidad del consejo importa.
+ */
+export async function coachNarrative(kind: 'weekly' | 'payday', input: unknown): Promise<string> {
+  const result = await generateText({
+    model: getAgentModel(),
+    system: kind === 'weekly' ? COACH_WEEKLY_SYSTEM_PROMPT : COACH_PAYDAY_SYSTEM_PROMPT,
+    prompt: JSON.stringify(input),
+    timeout: 30_000,
+    maxOutputTokens: 600,
   });
   return result.text.trim();
 }

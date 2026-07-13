@@ -121,6 +121,22 @@ export interface RecurringRecord {
   updatedAt: string;
 }
 
+// ── Metas de gasto por categoría (items BUD#<categoria>) ───────────────────
+
+/**
+ * Presupuesto "suave" mensual de una categoría: no bloquea nada, es la meta
+ * contra la que el coach y el guardián miden el gasto del mes.
+ */
+export interface BudgetRecord {
+  category: string;
+  /** Tope mensual en quetzales. */
+  monthlyLimit: number;
+  /** auto = sugerida por el bot y confirmada con botón; user = fijada a mano. */
+  source: 'auto' | 'user';
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ── Memoria de hechos (items FACT#<id>) ────────────────────────────────────
 
 /** Hecho durable que Allan le enseñó al agente ("mi salario cae el 15 y 29"). */
@@ -138,7 +154,7 @@ export interface ConversationMessage {
   at: string;
 }
 
-export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly' | 'guardian';
+export type ScheduleKind = 'primary' | 'followup' | 'monthly' | 'weekly' | 'guardian' | 'payday';
 
 export interface ScheduleEvent {
   kind: ScheduleKind;

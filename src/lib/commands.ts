@@ -13,11 +13,18 @@ export type Command =
   | { kind: 'proyeccion' }
   | { kind: 'export' }
   | { kind: 'saldo'; set: { account: AccountId; amount: number } | null; invalidArgs: boolean }
+  | { kind: 'metas'; action: MetasAction; invalidArgs: boolean }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
+export type MetasAction =
+  | { op: 'ver' }
+  | { op: 'sugerir' }
+  | { op: 'fijar'; category: string; amount: number }
+  | { op: 'quitar'; category: string };
+
 const COMMAND_RE =
-  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -56,6 +63,19 @@ export function matchCommand(text: string): Command | null {
       }
       return { kind: 'saldo', set: { account: account as AccountId, amount }, invalidArgs: false };
     }
+    case 'metas': {
+      if (!arg) return { kind: 'metas', action: { op: 'ver' }, invalidArgs: false };
+      if (/^sugerir$/i.test(arg)) return { kind: 'metas', action: { op: 'sugerir' }, invalidArgs: false };
+      const quitar = arg.match(/^quitar\s+(\S+)$/i);
+      if (quitar) return { kind: 'metas', action: { op: 'quitar', category: quitar[1]!.toLowerCase() }, invalidArgs: false };
+      const fijar = arg.match(/^(\S+)\s+([\d,]+(?:\.\d+)?)$/);
+      const amount = fijar ? Number.parseFloat(fijar[2]!.replaceAll(',', '')) : Number.NaN;
+      if (fijar && Number.isFinite(amount) && amount > 0) {
+        return { kind: 'metas', action: { op: 'fijar', category: fijar[1]!.toLowerCase(), amount }, invalidArgs: false };
+      }
+      return { kind: 'metas', action: { op: 'ver' }, invalidArgs: true };
+    }
+
     case 'borrar': {
       const n = Number.parseInt(arg?.replace(/^#/, '') ?? '', 10);
       return { kind: 'borrar', shortId: Number.isInteger(n) && n > 0 ? n : null };
@@ -98,6 +118,7 @@ export const HELP_TEXT = [
   '/categorias — tu base de conocimientos de categorías',
   '/saldo — cuánto tienes en cada cuenta (ajusta con: /saldo efectivo 350)',
   '/proyeccion — cuánto te quedará a fin de mes (ingresos y compromisos pendientes)',
+  '/metas — metas de gasto por categoría (/metas sugerir, /metas comida 1500)',
   '/recurrentes — tus gastos recurrentes aprendidos y por confirmar',
   '/memoria — los hechos que el agente ha aprendido de ti',
   '/export — el mes en curso como archivo CSV',
@@ -118,6 +139,7 @@ export const BOT_COMMANDS = [
   { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
   { command: 'saldo', description: 'Saldos de tus cuentas' },
   { command: 'proyeccion', description: 'Disponible proyectado a fin de mes' },
+  { command: 'metas', description: 'Metas de gasto por categoría' },
   { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
   { command: 'memoria', description: 'Hechos que el agente aprendió de ti' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },

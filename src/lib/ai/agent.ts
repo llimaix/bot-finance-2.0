@@ -54,6 +54,7 @@ export interface AgentDeps {
     };
   }) => Promise<unknown>;
   deleteMovement: (input: { numero: number; fecha: string | null }) => Promise<unknown>;
+  setBudget: (input: { categoria: string; topeMensual: number | null }) => Promise<unknown>;
 }
 
 export interface AgentResult {
@@ -88,7 +89,7 @@ export async function runAgent(
     tools: {
       registrar_movimientos: tool({
         description:
-          'Registra movimientos de dinero de Allan (gastos, ingresos, retiros, depósitos, transferencias). Declara en newCategories cualquier categoría nueva que uses.',
+          'Registra movimientos de dinero NUEVOS de Allan (gastos, ingresos, retiros, depósitos, transferencias). NO la uses para movimientos que ya aparecen en el contexto o la conversación, ni cuando Allan está cuadrando/reconciliando sus cuentas: ahí corresponde consultar, corregir o eliminar. Declara en newCategories cualquier categoría nueva que uses.',
         inputSchema: z.object({
           transactions: z.array(parsedTransactionSchema).min(1),
           newCategories: z.array(newCategorySchema),
@@ -164,6 +165,16 @@ export async function runAgent(
           fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
         }),
         execute: async (input) => deps.deleteMovement(input),
+      }),
+
+      fijar_meta: tool({
+        description:
+          'Fija (o quita) la meta de gasto mensual de una categoría cuando Allan lo pida ("ponme meta de Q1,500 en comida", "quita la meta de transporte"). topeMensual null = quitar la meta. Las metas vigentes y su avance vienen en consultar_datos (metasDeGasto).',
+        inputSchema: z.object({
+          categoria: z.string().min(2),
+          topeMensual: z.number().positive().nullable(),
+        }),
+        execute: async (input) => deps.setBudget(input),
       }),
 
       recordar_dato: tool({
