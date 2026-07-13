@@ -1,6 +1,8 @@
 import { Output, generateText } from 'ai';
 import type { z } from 'zod';
 import { emojiMapFrom, resolveCategory } from '../categories';
+import { config } from '../config';
+import { toQuetzales } from '../currency';
 import { normalizeParsedDate, todayGT, weekdayGT } from '../dates';
 import { getOrSeedCategories } from '../dynamo';
 import { logger } from '../logger';
@@ -63,7 +65,9 @@ function toOutcome(
   const transactions = raw.transactions
     // Los structured outputs no soportan `minimum`: el monto positivo se valida aquí.
     .filter((t) => Number.isFinite(t.amount) && t.amount > 0)
-    .map((t) => {
+    .map((raw_t) => {
+      // USD → Q en código, con la convención de la ingesta en la descripción.
+      const t = toQuetzales(raw_t, config.usdGtqRate);
       const resolved = resolveCategory(t.category, known, raw.newCategories);
       if (resolved.created && !createdCategories.some((c) => c.name === resolved.created!.name)) {
         createdCategories.push(resolved.created);
@@ -191,7 +195,8 @@ export async function correctTransaction(
     output: Output.object({ schema: parsedTransactionSchema }),
   });
 
-  const rawCorrected = result.output;
+  // USD → Q en código ("el monto es en dólares" convierte, no solo renombra).
+  const rawCorrected = toQuetzales(result.output, config.usdGtqRate);
   if (!Number.isFinite(rawCorrected.amount) || rawCorrected.amount <= 0) {
     throw new Error(`Corrección con monto inválido: ${rawCorrected.amount}`);
   }

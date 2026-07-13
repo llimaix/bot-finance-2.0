@@ -5,8 +5,8 @@ describe('parseResultSchema', () => {
   it('acepta el formato del system prompt', () => {
     const parsed = parseResultSchema.parse({
       transactions: [
-        { amount: 45, type: 'gasto', category: 'comida', method: 'efectivo', description: 'almuerzo', date: null },
-        { amount: 1500, type: 'deposito', category: 'ahorro', method: 'na', description: 'depósito ahorro', date: null },
+        { amount: 45, currency: 'GTQ', type: 'gasto', category: 'comida', method: 'efectivo', description: 'almuerzo', date: null },
+        { amount: 1500, currency: 'GTQ', type: 'deposito', category: 'ahorro', method: 'na', description: 'depósito ahorro', date: null },
       ],
       clarification: null,
       noMovements: false,
@@ -19,7 +19,7 @@ describe('parseResultSchema', () => {
   it('acepta categorías nuevas declaradas (catálogo abierto)', () => {
     const parsed = parseResultSchema.parse({
       transactions: [
-        { amount: 200, type: 'gasto', category: 'mascotas', method: 'efectivo', description: 'comida del perro', date: null },
+        { amount: 200, currency: 'GTQ', type: 'gasto', category: 'mascotas', method: 'efectivo', description: 'comida del perro', date: null },
       ],
       clarification: null,
       noMovements: false,
@@ -76,7 +76,7 @@ describe('parseResultSchema', () => {
     // categoría fuera del catálogo semilla: VÁLIDA (catálogo dinámico)
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 45, type: 'gasto', category: 'viajes', method: 'efectivo', description: 'x', date: null }],
+        transactions: [{ amount: 45, currency: 'GTQ', type: 'gasto', category: 'viajes', method: 'efectivo', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         question: null,
@@ -86,7 +86,7 @@ describe('parseResultSchema', () => {
     // type inventado: inválido
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 45, type: 'compra', category: 'comida', method: 'efectivo', description: 'x', date: null }],
+        transactions: [{ amount: 45, currency: 'GTQ', type: 'compra', category: 'comida', method: 'efectivo', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         newCategories: [],
@@ -95,7 +95,7 @@ describe('parseResultSchema', () => {
     // method inventado: inválido
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 45, type: 'gasto', category: 'comida', method: 'cheque', description: 'x', date: null }],
+        transactions: [{ amount: 45, currency: 'GTQ', type: 'gasto', category: 'comida', method: 'cheque', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         newCategories: [],
@@ -103,10 +103,39 @@ describe('parseResultSchema', () => {
     ).toThrow();
   });
 
+  it('currency: acepta USD, exige el campo y rechaza otras monedas', () => {
+    const usd = parseResultSchema.parse({
+      transactions: [{ amount: 100, currency: 'USD', type: 'gasto', category: 'suscripciones', method: 'credito', description: 'Anthropic Max', date: null }],
+      clarification: null,
+      noMovements: false,
+      question: null,
+      newCategories: [],
+    });
+    expect(usd.transactions[0]?.currency).toBe('USD');
+    expect(() =>
+      parseResultSchema.parse({
+        transactions: [{ amount: 45, type: 'gasto', category: 'comida', method: 'efectivo', description: 'x', date: null }],
+        clarification: null,
+        noMovements: false,
+        question: null,
+        newCategories: [],
+      }),
+    ).toThrow(); // sin currency
+    expect(() =>
+      parseResultSchema.parse({
+        transactions: [{ amount: 45, currency: 'EUR', type: 'gasto', category: 'comida', method: 'efectivo', description: 'x', date: null }],
+        clarification: null,
+        noMovements: false,
+        question: null,
+        newCategories: [],
+      }),
+    ).toThrow(); // moneda no soportada
+  });
+
   it('rechaza montos no numéricos', () => {
     expect(() =>
       parseResultSchema.parse({
-        transactions: [{ amount: 'Q45', type: 'gasto', category: 'comida', method: 'efectivo', description: 'x', date: null }],
+        transactions: [{ amount: 'Q45', currency: 'GTQ', type: 'gasto', category: 'comida', method: 'efectivo', description: 'x', date: null }],
         clarification: null,
         noMovements: false,
         newCategories: [],

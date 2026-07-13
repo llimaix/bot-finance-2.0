@@ -54,7 +54,8 @@ describe('renderConfirmation', () => {
     expect(msg).toContain('✅ Registrado (1 movimiento):');
     expect(msg).toContain('1. 🍽️ almuerzo — Q45.00 — efectivo');
     expect(msg).toContain('Total gastado hoy: Q245.00');
-    expect(msg).toContain('corrige #2');
+    // el ejemplo del pie usa el número REAL del movimiento (incidente 13-jul)
+    expect(msg).toContain('corrige #1');
     expect(msg).not.toContain('📅'); // movimiento de hoy: sin marca de fecha
   });
 

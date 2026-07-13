@@ -38,6 +38,7 @@ EventBridge Scheduler (hora de Guatemala)
 |---|---|
 | (texto o voz libre) | Registra movimientos: "almuerzo Q45 en efectivo y Q200 de gasolina con la de crédito" |
 | 📸 (foto de ticket) | Lee el comprobante con visión: total, comercio, fecha y método; el caption da contexto ("con la de crédito") |
+| 💵 (pagos en USD) | Suscripciones internacionales (Anthropic, Apple...) se registran en dólares y el **código** convierte a Q (tipo de cambio `USD_GTQ_RATE`, default 7.80) anotando la conversión: "(USD 100 ≈ Q780 a 7.80)" |
 | "ayer gasté..." | Fechas retroactivas: "ayer", "el lunes", "el 5 de julio" registran en la fecha real (hasta 1 año atrás) |
 | `/nada` (o "hoy nada") | Marca el día sin movimientos (apaga el seguimiento de las 21:00) |
 | `/export` | El mes en curso como archivo CSV (Excel) |

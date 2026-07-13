@@ -23,15 +23,23 @@ interface GoldenCase {
   expectTools: string[];
   /** Herramientas que NO debe llamar. */
   forbidTools?: string[];
+  /** Validación extra sobre los inputs de las herramientas (null = OK). */
+  check?: (inputs: Record<string, unknown[]>) => string | null;
+  /** Movimientos recientes en el contexto ('completo' = ayer y hoy, default). */
+  recent?: 'completo' | 'solo-ayer';
 }
 
 const CASES: GoldenCase[] = [
   { name: 'saludo no registra', user: 'Hola, ¿cómo estás?', expectTools: [], forbidTools: ['registrar_movimientos', 'dia_sin_movimientos'] },
   { name: 'gasto simple', user: 'gasté Q45 en almuerzo en efectivo', expectTools: ['registrar_movimientos'] },
   { name: 'retroactivo', user: 'ayer gasté Q80 de gasolina con la de débito', expectTools: ['registrar_movimientos'] },
-  { name: 'día sin movimientos', user: 'hoy nada', expectTools: ['dia_sin_movimientos'], forbidTools: ['registrar_movimientos'] },
+  // solo-ayer: con movimientos de hoy en el contexto, "hoy nada" sería contradictorio
+  { name: 'día sin movimientos', user: 'hoy nada', expectTools: ['dia_sin_movimientos'], forbidTools: ['registrar_movimientos'], recent: 'solo-ayer' },
   { name: 'pregunta de saldo', user: '¿Cuánto dinero tengo ahora?', expectTools: ['consultar_datos'], forbidTools: ['registrar_movimientos'] },
-  { name: 'corrección de cuenta (incidente Banrural)', user: 'en banrural solo tengo 40 quetzales', expectTools: ['ajustar_cuenta'], forbidTools: ['registrar_movimientos'] },
+  // El contexto dice Banrural Q40: corregir a Q25 SÍ requiere ajustar_cuenta.
+  // (Con el valor ya correcto el agente responde "ya lo tengo así" sin escribir
+  // — comportamiento deseado desde la guarda de reconciliación.)
+  { name: 'corrección de cuenta (incidente Banrural)', user: 'en banrural solo tengo 25 quetzales', expectTools: ['ajustar_cuenta'], forbidTools: ['registrar_movimientos'] },
   { name: 'hecho durable', user: 'mi salario cae el 15 y el 29 de cada mes, recordalo', expectTools: ['recordar_dato'] },
   { name: 'pregunta histórica', user: '¿cuánto gasté en farmacias en mayo?', expectTools: ['buscar_movimientos'] },
   { name: 'editar método (incidente débito)', user: 'los pagos 4, 5 y 6 de hoy fueron con débito y no crédito, ajustalos', expectTools: ['corregir_movimiento'], forbidTools: ['registrar_movimientos'] },
@@ -51,6 +59,22 @@ const CASES: GoldenCase[] = [
     user: 'ponme una meta de 1500 al mes en comida',
     expectTools: ['fijar_meta'],
     forbidTools: ['registrar_movimientos', 'recordar_dato'],
+  },
+  // Incidente 13-jul: pagos en dólares (Anthropic $100/mes). El agente registra
+  // con currency USD y el CÓDIGO convierte a Q — nunca debe quedar Q100.
+  {
+    name: 'pago en dólares registra en USD',
+    user: 'pagué la suscripción de Anthropic con la de crédito, son 100 dólares',
+    expectTools: ['registrar_movimientos'],
+    check: (inputs) => {
+      const first = inputs['registrar_movimientos']?.[0] as
+        | { transactions: Array<{ currency: string; amount: number }> }
+        | undefined;
+      const txns = first?.transactions ?? [];
+      return txns.some((t) => t.currency === 'USD' && t.amount === 100)
+        ? null
+        : `esperaba currency USD con amount 100 (dólares tal cual); vino: ${JSON.stringify(txns)}`;
+    },
   },
 ];
 
@@ -93,36 +117,55 @@ const SNAPSHOT = {
   mesActual: { periodo: 'julio (al día 12)', totalGastos: 8267.44, totalIngresos: 10143.15 },
 };
 
-function buildDeps(called: string[]): AgentDeps {
-  const track = <T>(name: string, value: T): T => {
+const CONTEXT_BASE = [
+  'Cuentas (saldo actual): Banco Industrial (BI) [id:banco]: Q2,101.01; Banrural [id:banrural]: Q40.00; Tarjeta BAC [id:tarjeta]: Q-4,246.37; Efectivo [id:efectivo]: Q700.00 (estimado); Kash [id:kash]: Q0.00 (estimado).',
+  'Catálogo de categorías: comida, supermercado, transporte, hogar, salud, educacion, entretenimiento, servicios, suscripciones, ahorro, deuda, tecnologia, viajes, otros.',
+  'Hechos que Allan te ha enseñado:\n- Energuate es su pago de energía eléctrica (categoría servicios).',
+];
+
+const RECENT_HEADER =
+  'Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:';
+
+const RECENT_YESTERDAY = [
+  '- #1 2026-07-11 Q1,000.00 debito retiro · Retiro de cajero para gastos de préstamos',
+  '- #2 2026-07-11 Q1,000.00 debito retiro · Retiro para salida con amigos',
+];
+
+const RECENT_TODAY = [
+  '- #1 2026-07-12 Q120.00 efectivo gasto · Cena con novia',
+  '- #2 2026-07-12 Q78.51 credito gasto · SAT2000',
+  '- #3 2026-07-12 Q75.00 credito gasto · SAT2000',
+  '- #4 2026-07-12 Q153.00 credito gasto · Neonet Guatemala',
+  '- #5 2026-07-12 Q195.00 credito gasto · Claro',
+  '- #6 2026-07-12 Q329.00 credito gasto · Internet residencial',
+];
+
+function buildDeps(
+  called: string[],
+  inputs: Record<string, unknown[]> = {},
+  opts: { recent?: 'completo' | 'solo-ayer' } = {},
+): AgentDeps {
+  const track = <T>(name: string, value: T, input?: unknown): T => {
     called.push(name);
+    if (input !== undefined) (inputs[name] ??= []).push(input);
     return value;
   };
+  const recent =
+    opts.recent === 'solo-ayer' ? RECENT_YESTERDAY : [...RECENT_YESTERDAY, ...RECENT_TODAY];
   return {
     today: '2026-07-12',
-    contextInfo: [
-      'Cuentas (saldo actual): Banco Industrial (BI) [id:banco]: Q2,101.01; Banrural [id:banrural]: Q40.00; Tarjeta BAC [id:tarjeta]: Q-4,246.37; Efectivo [id:efectivo]: Q700.00 (estimado); Kash [id:kash]: Q0.00 (estimado).',
-      'Catálogo de categorías: comida, supermercado, transporte, hogar, salud, educacion, entretenimiento, servicios, suscripciones, ahorro, deuda, tecnologia, viajes, otros.',
-      'Hechos que Allan te ha enseñado:\n- Energuate es su pago de energía eléctrica (categoría servicios).',
-      [
-        'Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:',
-        '- #1 2026-07-11 Q1,000.00 debito retiro · Retiro de cajero para gastos de préstamos',
-        '- #2 2026-07-11 Q1,000.00 debito retiro · Retiro para salida con amigos',
-        '- #1 2026-07-12 Q120.00 efectivo gasto · Cena con novia',
-        '- #2 2026-07-12 Q78.51 credito gasto · SAT2000',
-        '- #3 2026-07-12 Q75.00 credito gasto · SAT2000',
-        '- #4 2026-07-12 Q153.00 credito gasto · Neonet Guatemala',
-        '- #5 2026-07-12 Q195.00 credito gasto · Claro',
-        '- #6 2026-07-12 Q329.00 credito gasto · Internet residencial',
-      ].join('\n'),
-    ].join('\n'),
+    contextInfo: [...CONTEXT_BASE, [RECENT_HEADER, ...recent].join('\n')].join('\n'),
     register: async (input) =>
-      track('registrar_movimientos', {
-        txns: input.transactions.map((_, i) => fakeTxn(7 + i)),
-        createdCategories: [],
-        totalSpentToday: 145,
-        advertencias: [],
-      }),
+      track(
+        'registrar_movimientos',
+        {
+          txns: input.transactions.map((_, i) => fakeTxn(7 + i)),
+          createdCategories: [],
+          totalSpentToday: 145,
+          advertencias: [],
+        },
+        input,
+      ),
     snapshot: async () => track('consultar_datos', SNAPSHOT),
     adjustAccount: async (input) => track('ajustar_cuenta', { ok: true, cuenta: input.cuenta, saldoAlCierreDeHoy: input.nuevoSaldo }),
     markNoMovements: async () => {
@@ -161,10 +204,11 @@ async function main() {
   let failures = 0;
   for (const c of runs) {
     const called: string[] = [];
+    const inputs: Record<string, unknown[]> = {};
     let reply = '';
     let error: string | null = null;
     try {
-      const result = await runAgent(c.user, [], buildDeps(called), { timeoutMs: 45_000 });
+      const result = await runAgent(c.user, [], buildDeps(called, inputs, { recent: c.recent }), { timeoutMs: 45_000 });
       reply = result.text;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -172,13 +216,15 @@ async function main() {
 
     const missing = c.expectTools.filter((t) => !called.includes(t));
     const forbidden = (c.forbidTools ?? []).filter((t) => called.includes(t));
-    const pass = !error && missing.length === 0 && forbidden.length === 0 && reply.length > 0;
+    const checkError = error ? null : (c.check?.(inputs) ?? null);
+    const pass = !error && missing.length === 0 && forbidden.length === 0 && !checkError && reply.length > 0;
     if (!pass) failures += 1;
 
     console.log(`${pass ? '✅' : '❌'} ${c.name}`);
     console.log(`   herramientas: [${called.join(', ') || '(ninguna)'}]`);
     if (missing.length) console.log(`   FALTARON: ${missing.join(', ')}`);
     if (forbidden.length) console.log(`   PROHIBIDAS LLAMADAS: ${forbidden.join(', ')}`);
+    if (checkError) console.log(`   CHECK: ${checkError}`);
     if (error) console.log(`   ERROR: ${error}`);
     console.log(`   respuesta: ${reply.slice(0, 140).replaceAll('\n', ' ')}`);
   }

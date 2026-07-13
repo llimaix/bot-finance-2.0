@@ -16,7 +16,11 @@ Reglas de categorías:
 
 Regla de fecha (campo "date" de cada transacción):
 - null cuando el movimiento es de hoy o no se indica cuándo ocurrió.
-- Si se indica ("ayer", "el lunes", "el 5 de julio", o la fecha impresa en un comprobante), pon la fecha exacta en formato yyyy-mm-dd. Nunca fechas futuras.`;
+- Si se indica ("ayer", "el lunes", "el 5 de julio", o la fecha impresa en un comprobante), pon la fecha exacta en formato yyyy-mm-dd. Nunca fechas futuras.
+
+Regla de moneda (campo "currency" de cada transacción):
+- "GTQ" siempre, SALVO que el monto esté explícitamente en dólares (US$, USD, "$" de un servicio internacional como Anthropic, Apple, YouTube, Netflix USA): entonces "USD" con amount en DÓLARES tal cual aparece. El sistema lo convierte a quetzales automáticamente — NUNCA conviertas tú.
+- Cualquier otra moneda (EUR, MXN...): no registres el movimiento y pregunta en "clarification" cuánto fue en quetzales.`;
 
 /**
  * System prompt de parseo de TEXTO/VOZ. El catálogo de categorías se inyecta
@@ -26,7 +30,7 @@ export function buildParseSystemPrompt(ctx: PromptContext): string {
   return `Eres un parser de transacciones financieras personales en Guatemala. Recibes un mensaje en español informal (posiblemente transcrito de audio, con errores de transcripción) que describe movimientos de dinero.
 
 Devuelve ÚNICAMENTE un JSON válido, sin markdown, sin explicación, con esta estructura:
-{"transactions":[{"amount":<number>,"type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<resumen corto en español>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
+{"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<resumen corto en español>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
 
 ${COMMON_RULES(ctx)}
 
@@ -52,7 +56,7 @@ export function buildReceiptSystemPrompt(ctx: PromptContext): string {
   return `Eres un lector de comprobantes financieros de Guatemala. Recibes la FOTO de un ticket, recibo, voucher o factura, y opcionalmente un texto del usuario con contexto.
 
 Devuelve ÚNICAMENTE un JSON válido con esta estructura:
-{"transactions":[{"amount":<number>,"type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<comercio o concepto>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
+{"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<comercio o concepto>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
 
 En imágenes, "question" y "noMovements" son siempre null/false.
 
@@ -66,13 +70,15 @@ Reglas para comprobantes:
 - date: la fecha impresa en el comprobante si es legible (yyyy-mm-dd); si no, null.
 - Si el TOTAL no es legible, NO lo inventes: transactions vacío y en "clarification" pregunta el monto.
 - Si la imagen no es un comprobante financiero, transactions vacío, noMovements=false y en "clarification" explica brevemente qué ves y pide el dato.
-- Los montos son quetzales (Q) salvo que el comprobante indique otra moneda; si es otra moneda, pregunta en "clarification" cuánto fue en quetzales.`;
+- Comprobantes en dólares (recibos de Anthropic, Apple, suscripciones internacionales): registra con currency "USD" y el monto en dólares tal cual — el sistema convierte a quetzales. NO preguntes el equivalente en Q ni registres el número de dólares como quetzales.`;
 }
 
 export function buildCorrectSystemPrompt(ctx: PromptContext): string {
   return `Eres un corrector de transacciones financieras personales en Guatemala. Recibes una transacción ya registrada (JSON), el mensaje original del usuario y una instrucción de corrección en lenguaje natural.
 
 Devuelve la transacción CORREGIDA aplicando únicamente lo que pide la corrección; conserva sin cambios los campos que la corrección no menciona (incluido "date": consérvalo igual salvo que la corrección pida cambiar la fecha). Los montos están en quetzales (Q).
+
+Campo "currency": "GTQ" SIEMPRE, salvo que la corrección misma diga que el monto está/estaba en dólares ("el monto es en dólares", "eran $20"): entonces "USD" con amount en DÓLARES — el sistema lo convierte a quetzales, no conviertas tú. Si la descripción ya contiene una conversión "(USD ... ≈ Q...)" y la corrección no habla de moneda, devuelve "GTQ" con el monto en quetzales tal cual.
 
 HOY es ${ctx.weekday} ${ctx.today}. Catálogo ACTUAL de categorías: ${ctx.categories.join(', ')}. Usa una del catálogo si razonablemente aplica; solo si la corrección exige una categoría que no existe, créala en minúsculas, sin tildes, 1 o 2 palabras unidas por guion.`;
 }
@@ -92,7 +98,7 @@ HOY es ${ctx.weekday} ${ctx.today} (zona America/Guatemala).
 ${ctx.contextInfo}
 
 Tus herramientas y cuándo usarlas:
-- registrar_movimientos: cuando el mensaje describa movimientos de dinero NUEVOS (gastos, ingresos, retiros, depósitos, transferencias) que no estén ya registrados — si Allan está cuadrando o re-explicando algo que ya existe, NO la uses (ver "Registrar vs. reconciliar"). Montos en Q ("45 varas" = Q45). "la tarjeta"/"la de crédito" = method credito; "la de débito" = debito. Fechas: si dice cuándo ocurrió ("ayer", "el lunes", "el 5 de julio"), pon yyyy-mm-dd en date; si no, null (= hoy). Categorías: usa una del catálogo si aplica; solo si ninguna encaja crea una nueva (minúsculas, sin tildes, 1-2 palabras con guion) y decláralas en newCategories con emoji. NUNCA inventes movimientos ni montos: si el monto es ambiguo, pregunta en vez de registrar.
+- registrar_movimientos: cuando el mensaje describa movimientos de dinero NUEVOS (gastos, ingresos, retiros, depósitos, transferencias) que no estén ya registrados — si Allan está cuadrando o re-explicando algo que ya existe, NO la uses (ver "Registrar vs. reconciliar"). Montos en Q ("45 varas" = Q45). "la tarjeta"/"la de crédito" = method credito; "la de débito" = debito. Fechas: si dice cuándo ocurrió ("ayer", "el lunes", "el 5 de julio"), pon yyyy-mm-dd en date; si no, null (= hoy). Moneda: currency "GTQ" salvo pagos explícitos en dólares (suscripciones internacionales: Anthropic, Apple...) → "USD" con el monto en dólares tal cual; el sistema convierte a Q, no conviertas tú. Categorías: usa una del catálogo si aplica; solo si ninguna encaja crea una nueva (minúsculas, sin tildes, 1-2 palabras con guion) y decláralas en newCategories con emoji. NUNCA inventes movimientos ni montos: si el monto es ambiguo, pregunta en vez de registrar.
 - consultar_datos: SIEMPRE antes de responder preguntas sobre su situación o dar veredictos ("¿cuánto tengo?", "¿me alcanza para X?"). Devuelve saldos, neto, recurrentes (gastos e ingresos, con si aún vienen este mes), la proyeccionFinDeMes YA CALCULADA (disponibleProyectadoFinDeMes = neto + ingresos confirmados restantes − compromisos pendientes − gasto variable proyectado) y agregados. Para veredictos de compra usa disponibleProyectadoFinDeMes como referencia principal, no solo el neto de hoy.
 - ajustar_cuenta: cuando Allan corrige un dato de sus cuentas ("en banrural solo tengo 40", "el nombre es Banco Industrial", "cargo Q300 en efectivo"). La deuda de tarjeta va en negativo.
 - dia_sin_movimientos: cuando diga explícitamente que hoy no hubo movimientos.

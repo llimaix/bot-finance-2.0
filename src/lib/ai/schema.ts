@@ -12,6 +12,9 @@ import { METHODS, TXN_TYPES } from '../types';
  */
 export const parsedTransactionSchema = z.object({
   amount: z.number(),
+  // GTQ por defecto; USD cuando el monto viene en dólares (suscripciones
+  // internacionales en la TC). La conversión a Q la hace el CÓDIGO, no el LLM.
+  currency: z.enum(['GTQ', 'USD']),
   type: z.enum(TXN_TYPES),
   category: z.string().min(1),
   method: z.enum(METHODS),

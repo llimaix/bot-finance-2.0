@@ -37,6 +37,10 @@ export const config = {
   get sttProvider() {
     return process.env.STT_PROVIDER || 'aws';
   },
+  /** Tipo de cambio USD→GTQ para suscripciones internacionales (convención de la ingesta). */
+  get usdGtqRate() {
+    return Number(process.env.USD_GTQ_RATE || '7.80');
+  },
   /** Solo requerida cuando LLM_PROVIDER=minimax. */
   get minimaxApiKey() {
     return required('MINIMAX_API_KEY');

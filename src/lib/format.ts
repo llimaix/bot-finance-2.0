@@ -72,7 +72,10 @@ export function renderConfirmation(opts: {
   }
   lines.push(`Total gastado hoy: ${formatQ(opts.totalSpentToday)}`);
   if (opts.clarification) lines.push('', `❓ ${escapeHtml(opts.clarification)}`);
-  lines.push('', 'Si algo está mal, responde: "corrige #2 ..."');
+  // El ejemplo usa el número REAL del primer movimiento registrado: un "#2"
+  // inventado manda a corregir un movimiento que no existe (incidente 13-jul).
+  const ejemplo = opts.txns[0]?.shortId ?? 1;
+  lines.push('', `Si algo está mal, responde: "corrige #${ejemplo} ..."`);
   return lines.join('\n');
 }
 
