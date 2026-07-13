@@ -178,11 +178,12 @@ async function route(message: TelegramMessage): Promise<void> {
 
 async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {
   await sendTyping(chatId);
-  const [history, balances, cats, facts] = await Promise.all([
+  const [history, balances, cats, facts, recent] = await Promise.all([
     getConversation(),
     loadBalances(today),
     listCategories(),
     listFacts(),
+    queryRange(daysAgoGT(1), today),
   ]);
 
   const contextInfo = [
@@ -192,6 +193,13 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     `Catálogo de categorías: ${cats.map((c) => c.name).join(', ')}.`,
     ...(facts.length > 0
       ? [`Hechos que Allan te ha enseñado:\n${facts.map((f) => `- ${f.text}`).join('\n')}`]
+      : []),
+    ...(recent.length > 0
+      ? [
+          `Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:\n${recent
+            .map((t) => `- #${t.shortId} ${t.date} ${formatQ(t.amount)} ${t.method} ${t.type} · ${t.description}`)
+            .join('\n')}`,
+        ]
       : []),
   ].join('\n');
 

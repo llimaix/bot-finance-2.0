@@ -36,6 +36,15 @@ const CASES: GoldenCase[] = [
   { name: 'editar método (incidente débito)', user: 'los pagos 4, 5 y 6 de hoy fueron con débito y no crédito, ajustalos', expectTools: ['corregir_movimiento'], forbidTools: ['registrar_movimientos'] },
   { name: 'borrar movimiento', user: 'borra el movimiento 3 de hoy', expectTools: ['eliminar_movimiento'] },
   { name: 'veredicto de compra', user: 'me quiero comprar la play 5, ¿me alcanza?', expectTools: ['consultar_datos'], forbidTools: ['registrar_movimientos'] },
+  // Incidente 11-jul: reconciliar NO es registrar. El usuario re-explica para qué
+  // fueron los dos retiros que YA están registrados (ver contexto); el agente debe
+  // consultar/responder, NUNCA crear "préstamo" ni "salida" como gastos nuevos.
+  {
+    name: 'reconciliación no duplica (incidente 11-jul)',
+    user: 'Pongámonos en orden con lo de ayer: esos dos retiros de mil que ya tenés anotados, uno fue para prestarle a mamá y el otro para la salida con amigos. Solo quiero cuadrar, ¿cómo me quedó el efectivo?',
+    expectTools: ['consultar_datos'],
+    forbidTools: ['registrar_movimientos'],
+  },
 ];
 
 const fakeTxn = (shortId: number): Transaction => ({
@@ -88,6 +97,17 @@ function buildDeps(called: string[]): AgentDeps {
       'Cuentas (saldo actual): Banco Industrial (BI) [id:banco]: Q2,101.01; Banrural [id:banrural]: Q40.00; Tarjeta BAC [id:tarjeta]: Q-4,246.37; Efectivo [id:efectivo]: Q700.00 (estimado); Kash [id:kash]: Q0.00 (estimado).',
       'Catálogo de categorías: comida, supermercado, transporte, hogar, salud, educacion, entretenimiento, servicios, suscripciones, ahorro, deuda, tecnologia, viajes, otros.',
       'Hechos que Allan te ha enseñado:\n- Energuate es su pago de energía eléctrica (categoría servicios).',
+      [
+        'Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:',
+        '- #1 2026-07-11 Q1,000.00 debito retiro · Retiro de cajero para gastos de préstamos',
+        '- #2 2026-07-11 Q1,000.00 debito retiro · Retiro para salida con amigos',
+        '- #1 2026-07-12 Q120.00 efectivo gasto · Cena con novia',
+        '- #2 2026-07-12 Q78.51 credito gasto · SAT2000',
+        '- #3 2026-07-12 Q75.00 credito gasto · SAT2000',
+        '- #4 2026-07-12 Q153.00 credito gasto · Neonet Guatemala',
+        '- #5 2026-07-12 Q195.00 credito gasto · Claro',
+        '- #6 2026-07-12 Q329.00 credito gasto · Internet residencial',
+      ].join('\n'),
     ].join('\n'),
     register: async (input) =>
       track('registrar_movimientos', {
