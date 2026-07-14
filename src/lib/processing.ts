@@ -200,8 +200,13 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       : []),
     ...(recent.length > 0
       ? [
+          // HOY/AYER explícito por línea: el modelo no debe mapear fechas crudas
+          // a "hoy" (el 14-jul atribuyó a hoy un gasto de ayer y generó fricción).
           `Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:\n${recent
-            .map((t) => `- #${t.shortId} ${t.date} ${formatQ(t.amount)} ${t.method} ${t.type} · ${t.description}`)
+            .map(
+              (t) =>
+                `- #${t.shortId} ${t.date === today ? 'HOY' : 'AYER'} (${t.date}) ${formatQ(t.amount)} ${t.method} ${t.type} · ${t.description}`,
+            )
             .join('\n')}`,
         ]
       : []),

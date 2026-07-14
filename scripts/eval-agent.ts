@@ -9,7 +9,7 @@
  */
 import { runAgent } from '../src/lib/ai/agent';
 import type { AgentDeps } from '../src/lib/ai/agent';
-import type { Transaction } from '../src/lib/types';
+import type { ConversationMessage, Transaction } from '../src/lib/types';
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error('❌ Falta ANTHROPIC_API_KEY en el entorno.');
@@ -27,6 +27,8 @@ interface GoldenCase {
   check?: (inputs: Record<string, unknown[]>) => string | null;
   /** Movimientos recientes en el contexto ('completo' = ayer y hoy, default). */
   recent?: 'completo' | 'solo-ayer';
+  /** Historia previa de la conversación (memoria CONV), para casos multi-turno. */
+  history?: ConversationMessage[];
 }
 
 const CASES: GoldenCase[] = [
@@ -62,6 +64,24 @@ const CASES: GoldenCase[] = [
   },
   // Incidente 13-jul: pagos en dólares (Anthropic $100/mes). El agente registra
   // con currency USD y el CÓDIGO convierte a Q — nunca debe quedar Q100.
+  // Incidente 14-jul: tras aclarar la ambigüedad, "hoy no hice movimientos" debe
+  // marcar el día A LA PRIMERA — sin re-preguntar (acción inofensiva) y sin
+  // confundir el gym de AYER con un movimiento de hoy.
+  {
+    name: 'hoy nada tras aclarar no re-pregunta (incidente 14-jul)',
+    user: 'El día de hoy no he realizado ningún movimiento financiero',
+    history: [
+      { role: 'user', text: 'Si movimientos de momento', at: '2026-07-12T23:12:00Z' },
+      {
+        role: 'assistant',
+        text: '¿Me confirmas si quisiste decir "sin movimientos" hoy, o si tienes algún movimiento nuevo que registrar? No quiero marcarlo mal.',
+        at: '2026-07-12T23:12:30Z',
+      },
+    ],
+    expectTools: ['dia_sin_movimientos'],
+    forbidTools: ['registrar_movimientos', 'corregir_movimiento', 'eliminar_movimiento'],
+    recent: 'solo-ayer',
+  },
   {
     name: 'pago en dólares registra en USD',
     user: 'pagué la suscripción de Anthropic con la de crédito, son 100 dólares',
@@ -126,18 +146,20 @@ const CONTEXT_BASE = [
 const RECENT_HEADER =
   'Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:';
 
+// Mismo formato que produce agentFlow: HOY/AYER explícito + fecha.
 const RECENT_YESTERDAY = [
-  '- #1 2026-07-11 Q1,000.00 debito retiro · Retiro de cajero para gastos de préstamos',
-  '- #2 2026-07-11 Q1,000.00 debito retiro · Retiro para salida con amigos',
+  '- #1 AYER (2026-07-11) Q1,000.00 debito retiro · Retiro de cajero para gastos de préstamos',
+  '- #2 AYER (2026-07-11) Q1,000.00 debito retiro · Retiro para salida con amigos',
+  '- #3 AYER (2026-07-11) Q10.00 efectivo gasto · Pago de gym',
 ];
 
 const RECENT_TODAY = [
-  '- #1 2026-07-12 Q120.00 efectivo gasto · Cena con novia',
-  '- #2 2026-07-12 Q78.51 credito gasto · SAT2000',
-  '- #3 2026-07-12 Q75.00 credito gasto · SAT2000',
-  '- #4 2026-07-12 Q153.00 credito gasto · Neonet Guatemala',
-  '- #5 2026-07-12 Q195.00 credito gasto · Claro',
-  '- #6 2026-07-12 Q329.00 credito gasto · Internet residencial',
+  '- #1 HOY (2026-07-12) Q120.00 efectivo gasto · Cena con novia',
+  '- #2 HOY (2026-07-12) Q78.51 credito gasto · SAT2000',
+  '- #3 HOY (2026-07-12) Q75.00 credito gasto · SAT2000',
+  '- #4 HOY (2026-07-12) Q153.00 credito gasto · Neonet Guatemala',
+  '- #5 HOY (2026-07-12) Q195.00 credito gasto · Claro',
+  '- #6 HOY (2026-07-12) Q329.00 credito gasto · Internet residencial',
 ];
 
 function buildDeps(
@@ -208,7 +230,7 @@ async function main() {
     let reply = '';
     let error: string | null = null;
     try {
-      const result = await runAgent(c.user, [], buildDeps(called, inputs, { recent: c.recent }), { timeoutMs: 45_000 });
+      const result = await runAgent(c.user, c.history ?? [], buildDeps(called, inputs, { recent: c.recent }), { timeoutMs: 45_000 });
       reply = result.text;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
