@@ -1,10 +1,11 @@
 import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
+import { config } from '../config';
 import { weekdayGT } from '../dates';
 import { logger } from '../logger';
 import { ACCOUNT_IDS, METHODS, TXN_TYPES } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
-import { getAgentModel } from './llm';
+import { getAgentModel, logUsage } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
 import { newCategorySchema, parsedTransactionSchema } from './schema';
 
@@ -199,9 +200,15 @@ export async function runAgent(
     stopWhen: stepCountIs(5),
     temperature: 0,
     timeout: opts.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
+    // Las respuestas son de ~120 palabras: el tope evita salidas desbocadas.
+    maxOutputTokens: 700,
   });
 
   const text = result.text.trim() || (registered.length > 0 ? '✅ Registrado.' : '🤔 No supe qué hacer con eso, ¿me lo repites?');
+  // totalUsage: suma de TODOS los pasos del loop (usage es solo el último).
+  logUsage('runAgent', config.llmModelAgent, result.totalUsage ?? result.usage, {
+    steps: result.steps?.length,
+  });
   logger.info('agente completado', {
     userText,
     steps: result.steps?.length,

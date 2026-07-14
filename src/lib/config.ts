@@ -27,12 +27,27 @@ export const config = {
   get llmProvider() {
     return process.env.LLM_PROVIDER || 'anthropic';
   },
+  // Defaults POR PROVEEDOR: cambiar a MiniMax es UNA variable (LLM_PROVIDER),
+  // los modelos caen solos al correcto (olvidar LLM_MODEL_AGENT mandaba a pedir
+  // "claude-sonnet-5" al API de MiniMax).
   get llmModel() {
-    return process.env.LLM_MODEL || 'claude-haiku-4-5';
+    return process.env.LLM_MODEL || (this.llmProvider === 'minimax' ? 'MiniMax-M2' : 'claude-haiku-4-5');
   },
   /** Modelo del tool loop del agente: razonamiento superior solo donde importa. */
   get llmModelAgent() {
-    return process.env.LLM_MODEL_AGENT || 'claude-sonnet-5';
+    return (
+      process.env.LLM_MODEL_AGENT || (this.llmProvider === 'minimax' ? 'MiniMax-M2' : 'claude-sonnet-5')
+    );
+  },
+  /** Proveedor/modelo de VISIÓN (comprobantes): separable del principal porque
+   *  no todo modelo de texto acepta imágenes (MiniMax-M2 es solo texto). */
+  get llmProviderVision() {
+    return process.env.LLM_PROVIDER_VISION || this.llmProvider;
+  },
+  get llmModelVision() {
+    if (process.env.LLM_MODEL_VISION) return process.env.LLM_MODEL_VISION;
+    if (this.llmProviderVision === this.llmProvider) return this.llmModel;
+    return this.llmProviderVision === 'minimax' ? 'MiniMax-M2' : 'claude-haiku-4-5';
   },
   get sttProvider() {
     return process.env.STT_PROVIDER || 'aws';

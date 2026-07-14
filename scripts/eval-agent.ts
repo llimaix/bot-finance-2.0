@@ -4,17 +4,21 @@
  * real con dependencias simuladas en memoria y valida qué herramientas llama.
  *
  * Uso:  ANTHROPIC_API_KEY=sk-... pnpm tsx scripts/eval-agent.ts [filtro] [--times N]
- * (correrlo antes de deployar cambios de prompts/herramientas; el filtro corre
- * solo los casos cuyo nombre lo contenga, N veces — para medir estabilidad)
+ *       LLM_PROVIDER=minimax MINIMAX_API_KEY=... pnpm tsx scripts/eval-agent.ts
+ * (correrlo antes de deployar cambios de prompts/herramientas/proveedor; el
+ * filtro corre solo los casos cuyo nombre lo contenga, N veces — estabilidad)
  */
 import { runAgent } from '../src/lib/ai/agent';
 import type { AgentDeps } from '../src/lib/ai/agent';
+import { config } from '../src/lib/config';
 import type { ConversationMessage, Transaction } from '../src/lib/types';
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error('❌ Falta ANTHROPIC_API_KEY en el entorno.');
+const keyName = config.llmProvider === 'minimax' ? 'MINIMAX_API_KEY' : 'ANTHROPIC_API_KEY';
+if (!process.env[keyName]) {
+  console.error(`❌ Falta ${keyName} en el entorno (proveedor: ${config.llmProvider}).`);
   process.exit(1);
 }
+console.log(`Proveedor: ${config.llmProvider} · modelo del agente: ${config.llmModelAgent}\n`);
 
 interface GoldenCase {
   name: string;

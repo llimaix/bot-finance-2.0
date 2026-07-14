@@ -73,6 +73,8 @@ jobs:
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           LLM_MODEL_AGENT: ${{ vars.LLM_MODEL_AGENT }}
+          LLM_PROVIDER_VISION: ${{ vars.LLM_PROVIDER_VISION }}
+          LLM_MODEL_VISION: ${{ vars.LLM_MODEL_VISION }}
           STT_PROVIDER: ${{ vars.STT_PROVIDER }}
           BILLING_ALERT_EMAIL: ${{ vars.BILLING_ALERT_EMAIL }}
 

@@ -110,8 +110,16 @@ El único punto de acoplamiento es `src/lib/ai/llm.ts` (LLM) y `src/lib/stt/inde
 **Pasar a MiniMax (ya soportado):**
 
 1. Secret nuevo: `MINIMAX_API_KEY` (key de [platform.minimax.io](https://platform.minimax.io)).
-2. Variables del environment: `LLM_PROVIDER=minimax`, `LLM_MODEL=MiniMax-M2`.
-3. Relanza el workflow (o push a `main`). Para volver a Claude, borra/cambia las variables.
+2. Variable del environment: `LLM_PROVIDER=minimax` — los modelos caen solos a `MiniMax-M2` (texto y agente).
+3. **Visión**: MiniMax-M2 es solo texto. Para seguir leyendo fotos de comprobantes agrega `LLM_PROVIDER_VISION=anthropic` (usa `claude-haiku-4-5`; centavos al mes, requiere un mínimo de crédito Anthropic). Sin esto, las fotos intentarán ir a MiniMax.
+4. Relanza el workflow (o push a `main`). Para volver a Claude, borra/cambia las variables.
+
+**Visibilidad de costos**: cada llamada al LLM queda en los logs como `uso LLM` con `fn`, `model`, `inputTokens` y `outputTokens`. Para ver el consumo por función en CloudWatch Logs Insights:
+
+```
+fields @timestamp | filter message = "uso LLM"
+| stats sum(inputTokens) as entrada, sum(outputTokens) as salida, count(*) as llamadas by fn, model
+```
 
 **Agregar otro proveedor** (OpenAI, Google, DeepSeek/Kimi vía openai-compatible): un case nuevo en `src/lib/ai/llm.ts` siguiendo el patrón de `minimax`, su secret en GitHub y su línea en el workflow. La lógica de negocio no cambia: el schema zod valida la salida venga de donde venga.
 

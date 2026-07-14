@@ -7,7 +7,7 @@ import { normalizeParsedDate, todayGT, weekdayGT } from '../dates';
 import { getOrSeedCategories } from '../dynamo';
 import { logger } from '../logger';
 import type { CategoryRecord, ParsedTransaction, Transaction } from '../types';
-import { getAgentModel, getModel } from './llm';
+import { getAgentModel, getModel, getVisionModel, logUsage } from './llm';
 import {
   ANSWER_SYSTEM_PROMPT,
   COACH_PAYDAY_SYSTEM_PROMPT,
@@ -117,6 +117,7 @@ export async function parseTransactions(text: string): Promise<ParseOutcome> {
   });
 
   const outcome = toOutcome(result.output, catalog, known, ctx.today);
+  logUsage('parseTransactions', config.llmModel, result.usage);
   logger.info('parseo completado', {
     rawMessage: text,
     parsed: result.output,
@@ -134,7 +135,8 @@ export async function parseReceipt(
   const { ctx, catalog, known } = await loadPromptContext();
 
   const result = await generateText({
-    model: getModel(),
+    // Modelo de VISIÓN: separable del principal (MiniMax-M2 es solo texto).
+    model: getVisionModel(),
     system: buildReceiptSystemPrompt(ctx),
     messages: [
       {
@@ -156,6 +158,7 @@ export async function parseReceipt(
   });
 
   const outcome = toOutcome(result.output, catalog, known, ctx.today);
+  logUsage('parseReceipt', config.llmModelVision, result.usage);
   logger.info('comprobante procesado', {
     caption,
     imageBytes: image.length,
@@ -207,6 +210,7 @@ export async function correctTransaction(
   const { date: _date, ...fields } = rawCorrected;
   const corrected: ParsedTransaction = { ...fields, category: resolved.name };
 
+  logUsage('correctTransaction', config.llmModel, result.usage);
   logger.info('corrección completada', { original: visible, correctionText, corrected });
   return {
     corrected,
@@ -225,6 +229,7 @@ export async function answerQuestion(question: string, snapshot: unknown): Promi
     timeout: LLM_TIMEOUT_MS,
     maxOutputTokens: 400,
   });
+  logUsage('answerQuestion', config.llmModel, result.usage);
   return result.text.trim();
 }
 
@@ -240,6 +245,7 @@ export async function coachNarrative(kind: 'weekly' | 'payday', input: unknown):
     timeout: 30_000,
     maxOutputTokens: 600,
   });
+  logUsage(`coach:${kind}`, config.llmModelAgent, result.usage);
   return result.text.trim();
 }
 
@@ -252,5 +258,6 @@ export async function narrateReport(aggregates: unknown): Promise<string> {
     timeout: 30_000,
     maxOutputTokens: 1500,
   });
+  logUsage('narrateReport', config.llmModel, result.usage);
   return result.text.trim();
 }

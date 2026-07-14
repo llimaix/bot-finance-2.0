@@ -53,9 +53,12 @@ export class FinanzasStack extends Stack {
       ALLOWED_CHAT_ID: secrets.ALLOWED_CHAT_ID,
       // Proveedores intercambiables: cambiar de LLM/STT es cambiar estas vars
       // (en CI vienen del environment de GitHub; vacías → default con ||).
+      // Vacío = default por proveedor (resuelto en config.ts, no aquí).
       LLM_PROVIDER: process.env.LLM_PROVIDER || 'anthropic',
-      LLM_MODEL: process.env.LLM_MODEL || 'claude-haiku-4-5',
-      LLM_MODEL_AGENT: process.env.LLM_MODEL_AGENT || 'claude-sonnet-5',
+      LLM_MODEL: process.env.LLM_MODEL || '',
+      LLM_MODEL_AGENT: process.env.LLM_MODEL_AGENT || '',
+      LLM_PROVIDER_VISION: process.env.LLM_PROVIDER_VISION || '',
+      LLM_MODEL_VISION: process.env.LLM_MODEL_VISION || '',
       STT_PROVIDER: process.env.STT_PROVIDER || 'aws',
     };
 
