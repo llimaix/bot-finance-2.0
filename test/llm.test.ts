@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getAgentModel, getModel, getVisionModel } from '../src/lib/ai/llm';
+import { getAgentModel, getModel, getVisionModel, stripThinking } from '../src/lib/ai/llm';
 
 // El factory no hace llamadas de red al construir el modelo: se puede probar en unit.
 afterEach(() => {
@@ -72,5 +72,24 @@ describe('getVisionModel', () => {
     expect(vision.provider).toContain('anthropic');
     // el resto del sistema sigue en minimax
     expect((getModel() as ModelLike).provider).toContain('minimax');
+  });
+});
+
+describe('stripThinking', () => {
+  it('quita el bloque <think> de los modelos razonadores (MiniMax-M3)', () => {
+    expect(stripThinking('<think>\nEl usuario saluda. Respondo corto.\n</think>\n\n¡Hola Allan!')).toBe('¡Hola Allan!');
+  });
+
+  it('quita múltiples bloques y conserva el resto', () => {
+    expect(stripThinking('<think>a</think>Listo, registrado.<think>b</think> ¿Algo más?')).toBe('Listo, registrado. ¿Algo más?');
+  });
+
+  it('tag sin cerrar (salida truncada): corta desde ahí', () => {
+    expect(stripThinking('Anotado 👍\n<think>ahora debería')).toBe('Anotado 👍');
+    expect(stripThinking('<think>solo pensamiento truncado')).toBe('');
+  });
+
+  it('texto sin tags pasa intacto', () => {
+    expect(stripThinking('  Listo, Q45 registrados.  ')).toBe('Listo, Q45 registrados.');
   });
 });

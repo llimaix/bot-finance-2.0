@@ -5,7 +5,7 @@ import { weekdayGT } from '../dates';
 import { logger } from '../logger';
 import { ACCOUNT_IDS, METHODS, TXN_TYPES } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
-import { getAgentModel, logUsage } from './llm';
+import { getAgentModel, logUsage, stripThinking } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
 import { newCategorySchema, parsedTransactionSchema } from './schema';
 
@@ -204,7 +204,9 @@ export async function runAgent(
     maxOutputTokens: 700,
   });
 
-  const text = result.text.trim() || (registered.length > 0 ? '✅ Registrado.' : '🤔 No supe qué hacer con eso, ¿me lo repites?');
+  const text =
+    stripThinking(result.text) ||
+    (registered.length > 0 ? '✅ Registrado.' : '🤔 No supe qué hacer con eso, ¿me lo repites?');
   // totalUsage: suma de TODOS los pasos del loop (usage es solo el último).
   logUsage('runAgent', config.llmModelAgent, result.totalUsage ?? result.usage, {
     steps: result.steps?.length,

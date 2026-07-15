@@ -11,6 +11,7 @@
 import { runAgent } from '../src/lib/ai/agent';
 import type { AgentDeps } from '../src/lib/ai/agent';
 import { config } from '../src/lib/config';
+import { toQuetzales } from '../src/lib/currency';
 import type { ConversationMessage, Transaction } from '../src/lib/types';
 
 const keyName = config.llmProvider === 'minimax' ? 'MINIMAX_API_KEY' : 'ANTHROPIC_API_KEY';
@@ -185,7 +186,21 @@ function buildDeps(
       track(
         'registrar_movimientos',
         {
-          txns: input.transactions.map((_, i) => fakeTxn(7 + i)),
+          // Eco del input real (con la conversión USD→Q de producción): un mock
+          // incoherente ("almuerzo Q45" fijo) hace que un modelo atento crea
+          // que el sistema falla y reintente.
+          txns: input.transactions.map((t, i) => {
+            const q = toQuetzales(t, 7.8);
+            return {
+              ...fakeTxn(7 + i),
+              amount: q.amount,
+              type: q.type,
+              category: q.category,
+              method: q.method,
+              description: q.description,
+              ...(q.date ? { date: q.date } : {}),
+            };
+          }),
           createdCategories: [],
           totalSpentToday: 145,
           advertencias: [],
@@ -222,7 +237,9 @@ async function main() {
   const args = process.argv.slice(2);
   const timesIdx = args.indexOf('--times');
   const times = timesIdx >= 0 ? Number.parseInt(args[timesIdx + 1] ?? '1', 10) : 1;
-  const filter = args.filter((a, i) => a !== '--times' && i !== timesIdx + 1)[0];
+  // Sin --times, timesIdx+1 era 0 y el filtro descartaba su propio argumento.
+  const positional = timesIdx >= 0 ? args.filter((_, i) => i !== timesIdx && i !== timesIdx + 1) : args;
+  const filter = positional[0];
 
   const selected = filter ? CASES.filter((c) => c.name.includes(filter)) : CASES;
   const runs = Array.from({ length: Math.max(1, times) }, () => selected).flat();

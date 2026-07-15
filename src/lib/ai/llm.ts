@@ -60,6 +60,19 @@ export function getVisionModel(): LanguageModel {
 }
 
 /**
+ * Los modelos razonadores servidos por API OpenAI-compatible (MiniMax-M3)
+ * devuelven su cadena de pensamiento como <think>...</think> DENTRO del texto.
+ * Se quita antes de que cualquier respuesta llegue a Telegram; si el tag quedó
+ * sin cerrar (salida truncada), se corta desde ahí.
+ */
+export function stripThinking(text: string): string {
+  let out = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const unclosed = out.search(/<think>/i);
+  if (unclosed >= 0) out = out.slice(0, unclosed);
+  return out.trim();
+}
+
+/**
  * Registro de consumo por llamada, para responder "¿en qué se van los tokens?"
  * desde CloudWatch Logs Insights sin depender del dashboard del proveedor.
  */

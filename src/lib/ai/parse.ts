@@ -7,7 +7,7 @@ import { normalizeParsedDate, todayGT, weekdayGT } from '../dates';
 import { getOrSeedCategories } from '../dynamo';
 import { logger } from '../logger';
 import type { CategoryRecord, ParsedTransaction, Transaction } from '../types';
-import { getAgentModel, getModel, getVisionModel, logUsage } from './llm';
+import { getAgentModel, getModel, getVisionModel, logUsage, stripThinking } from './llm';
 import {
   ANSWER_SYSTEM_PROMPT,
   COACH_PAYDAY_SYSTEM_PROMPT,
@@ -230,7 +230,7 @@ export async function answerQuestion(question: string, snapshot: unknown): Promi
     maxOutputTokens: 400,
   });
   logUsage('answerQuestion', config.llmModel, result.usage);
-  return result.text.trim();
+  return stripThinking(result.text);
 }
 
 /**
@@ -246,7 +246,7 @@ export async function coachNarrative(kind: 'weekly' | 'payday', input: unknown):
     maxOutputTokens: 600,
   });
   logUsage(`coach:${kind}`, config.llmModelAgent, result.usage);
-  return result.text.trim();
+  return stripThinking(result.text);
 }
 
 /** Redacta el análisis del reporte a partir de agregados YA calculados en código. */
@@ -259,5 +259,5 @@ export async function narrateReport(aggregates: unknown): Promise<string> {
     maxOutputTokens: 1500,
   });
   logUsage('narrateReport', config.llmModel, result.usage);
-  return result.text.trim();
+  return stripThinking(result.text);
 }
