@@ -100,3 +100,70 @@ describe('monthLabelES', () => {
     expect(monthLabelES('2026-06')).toContain('2026');
   });
 });
+
+describe('calendario de pagos (15 y fin de mes, ajustado a día hábil)', () => {
+  it('julio 2026: 15 (miércoles) y 31 (viernes) quedan tal cual', async () => {
+    const { paydaysOfMonth } = await import('../src/lib/dates');
+    expect(paydaysOfMonth('2026-07')).toEqual(['2026-07-15', '2026-07-31']);
+  });
+
+  it('sábado retrocede a viernes: 15-ago-2026 → 14; 31-oct-2026 → 30', async () => {
+    const { paydaysOfMonth } = await import('../src/lib/dates');
+    expect(paydaysOfMonth('2026-08')[0]).toBe('2026-08-14');
+    expect(paydaysOfMonth('2026-10')[1]).toBe('2026-10-30');
+  });
+
+  it('domingo retrocede a viernes: 15-nov-2026 → 13; 28-feb-2027 → 26', async () => {
+    const { paydaysOfMonth } = await import('../src/lib/dates');
+    expect(paydaysOfMonth('2026-11')[0]).toBe('2026-11-13');
+    expect(paydaysOfMonth('2027-02')[1]).toBe('2027-02-26');
+  });
+
+  it('nextPaydayAfter cruza al mes siguiente cuando toca', async () => {
+    const { nextPaydayAfter } = await import('../src/lib/dates');
+    expect(nextPaydayAfter('2026-07-14')).toBe('2026-07-15'); // "mañana me pagan"
+    expect(nextPaydayAfter('2026-07-15')).toBe('2026-07-31');
+    expect(nextPaydayAfter('2026-07-31')).toBe('2026-08-14'); // 15-ago es sábado
+  });
+});
+
+describe('applySalaryCalendar', () => {
+  it('reemplaza el día observado por el del calendario y revive aunVieneEsteMes', async () => {
+    const { applySalaryCalendar } = await import('../src/lib/recurring');
+    const base = {
+      categoria: 'otros',
+      tipo: 'ingreso' as const,
+      montoTipico: 6284,
+      estado: 'confirmado' as const,
+      yaPagadoEsteMes: false,
+    };
+    const [q1, q2] = applySalaryCalendar(
+      [
+        { ...base, descripcion: 'Salario 1ra quincena', diaTipicoDePago: 15, aunVieneEsteMes: false },
+        // día observado 25 con hoy=28: el modelo viejo lo daba por perdido
+        { ...base, descripcion: 'Salario 2da quincena', diaTipicoDePago: 25, aunVieneEsteMes: false },
+      ],
+      [15, 31],
+      28,
+    );
+    expect(q1!.diaTipicoDePago).toBe(15);
+    expect(q1!.aunVieneEsteMes).toBe(false); // el 15 ya pasó y no está pagado: no viene
+    expect(q2!.diaTipicoDePago).toBe(31);
+    expect(q2!.aunVieneEsteMes).toBe(true); // pago real el 31: SÍ viene
+  });
+
+  it('no toca gastos ni ingresos que no son salario', async () => {
+    const { applySalaryCalendar } = await import('../src/lib/recurring');
+    const gasto = {
+      descripcion: 'Universidad',
+      categoria: 'educacion',
+      tipo: 'gasto' as const,
+      montoTipico: 1840,
+      diaTipicoDePago: 6,
+      estado: 'confirmado' as const,
+      yaPagadoEsteMes: true,
+      aunVieneEsteMes: false,
+    };
+    expect(applySalaryCalendar([gasto], [15, 31], 28)).toEqual([gasto]);
+  });
+});

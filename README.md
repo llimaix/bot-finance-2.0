@@ -20,7 +20,8 @@ EventBridge Scheduler (hora de Guatemala)
   ├─ 17:00 diario     ──▶ Lambda reminder (recordatorio)
   ├─ 21:00 diario     ──▶ Lambda reminder (seguimiento solo si no respondiste)
   ├─ 20:00 domingo    ──▶ Lambda reminder (resumen semanal + COACH: análisis y consejos)
-  ├─ 08:00 día 14 y 28──▶ Lambda reminder (plan de quincena: cuánto apartar antes del pago)
+  ├─ 08:00 diario     ──▶ Lambda reminder (plan de quincena: habla solo en víspera de pago
+  │                        real — el 15 y el fin de mes, ajustados a día hábil)
   └─ 08:00 día 1      ──▶ Lambda monthly-report (reporte del mes cerrado)
 ```
 
@@ -59,7 +60,7 @@ EventBridge Scheduler (hora de Guatemala)
 
 Cada confirmación trae **botones inline** `🗑️ #N` para borrar al toque.
 
-**Coach proactivo**: los domingos 20:00 llega el resumen semanal con análisis del coach (qué cambió vs la semana pasada, cómo va el mes y 2-3 acciones concretas); los días 14 y 28 a las 08:00 —víspera de las quincenas— llega el **plan de quincena** (cuánto apartar para compromisos + colchón antes de gastar). Los números se calculan en código; el LLM solo redacta el consejo.
+**Coach proactivo**: los domingos 20:00 llega el resumen semanal con análisis del coach (qué cambió vs la semana pasada, cómo va el mes y 2-3 acciones concretas); en la víspera de cada pago real —el 15 y el último día del mes, retrocedidos a día hábil si caen en fin de semana— llega el **plan de quincena** (cuánto apartar para compromisos + colchón antes de gastar). Los números se calculan en código; el LLM solo redacta el consejo.
 
 ## Setup inicial (una sola vez)
 

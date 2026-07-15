@@ -188,13 +188,16 @@ export class FinanzasStack extends Stack {
       description: 'Resumen semanal domingo 20:00 GT',
     });
 
+    // Los pagos reales son el 15 y el ÚLTIMO día del mes, retrocedidos a día
+    // hábil si caen en fin de semana — cron no puede expresar eso, así que
+    // corre diario y el handler decide si mañana es día de pago (si no, calla).
     new scheduler.Schedule(this, 'PaydayCheckpoint', {
-      schedule: scheduler.ScheduleExpression.cron({ minute: '0', hour: '8', day: '14,28', timeZone: GT }),
+      schedule: scheduler.ScheduleExpression.cron({ minute: '0', hour: '8', timeZone: GT }),
       target: new targets.LambdaInvoke(reminderFn, {
         input: scheduler.ScheduleTargetInput.fromObject({ kind: 'payday' }),
         retryAttempts: 2,
       }),
-      description: 'Plan de quincena día 14 y 28, 08:00 GT (víspera de los pagos del 15 y 29)',
+      description: 'Plan de quincena 08:00 GT (habla solo en víspera de pago real: 15 y fin de mes, ajustado a día hábil)',
     });
 
     new scheduler.Schedule(this, 'MonthlyReport', {

@@ -1,6 +1,6 @@
 import { coachNarrative } from '../lib/ai/parse';
 import { config } from '../lib/config';
-import { daysAgoGT, daysInMonth, monthPrefixGT, todayGT } from '../lib/dates';
+import { addDaysTo, daysAgoGT, daysInMonth, monthPrefixGT, nextPaydayAfter, todayGT } from '../lib/dates';
 import { getDayState, queryRange } from '../lib/dynamo';
 import { escapeHtml, formatQ, renderWeek } from '../lib/format';
 import { guardianFindings, loadAdvisorData, paydayCoachInput, weeklyCoachInput } from '../lib/insights';
@@ -50,6 +50,13 @@ export const handler = async (event: ScheduleEvent): Promise<void> => {
   }
 
   if (event.kind === 'payday') {
+    // Corre a diario; solo habla si MAÑANA es día de pago real (15 o fin de
+    // mes, retrocedido a día hábil cuando cae en fin de semana).
+    const payday = nextPaydayAfter(today);
+    if (payday !== addDaysTo(today, 1)) {
+      logger.info('checkpoint de quincena omitido: mañana no es día de pago', { date: today, proximoPago: payday });
+      return;
+    }
     const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
     const input = paydayCoachInput(data);
     const advice = await coachNarrative('payday', input).catch((err) => {

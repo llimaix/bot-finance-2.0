@@ -68,6 +68,49 @@ export function normalizeParsedDate(raw: string | null | undefined, today: strin
   return raw;
 }
 
+// ── Calendario de pagos de Allan ────────────────────────────────────────────
+// Regla real (2026-07-14): salario quincenal el 15 y el ÚLTIMO día del mes;
+// si el día cae en fin de semana, se paga el último día HÁBIL anterior
+// (15 en domingo → viernes 13; 31 en sábado → viernes 30).
+
+/** Suma n días (puede ser negativo) a una fecha yyyy-mm-dd, aritmética pura. */
+export function addDaysTo(date: string, n: number): string {
+  return new Date(new Date(`${date}T00:00:00Z`).getTime() + n * MS_PER_DAY)
+    .toISOString()
+    .slice(0, 10);
+}
+
+/** 0=domingo .. 6=sábado de una fecha yyyy-mm-dd (fecha pura, sin zona). */
+function weekdayOf(date: string): number {
+  return new Date(`${date}T00:00:00Z`).getUTCDay();
+}
+
+/** Retrocede al último día hábil si la fecha cae en fin de semana. */
+export function adjustToBusinessDay(date: string): string {
+  const wd = weekdayOf(date);
+  if (wd === 6) return addDaysTo(date, -1); // sábado → viernes
+  if (wd === 0) return addDaysTo(date, -2); // domingo → viernes
+  return date;
+}
+
+/** Los dos días de pago REALES de un mes yyyy-mm (quincena y fin de mes). */
+export function paydaysOfMonth(yyyyMM: string): [string, string] {
+  const last = String(daysInMonth(yyyyMM)).padStart(2, '0');
+  return [adjustToBusinessDay(`${yyyyMM}-15`), adjustToBusinessDay(`${yyyyMM}-${last}`)];
+}
+
+/** El próximo día de pago ESTRICTAMENTE posterior a la fecha dada. */
+export function nextPaydayAfter(date: string): string {
+  const candidates = [...paydaysOfMonth(date.slice(0, 7)), ...paydaysOfMonth(nextMonthOf(date.slice(0, 7)))];
+  return candidates.find((d) => d > date)!;
+}
+
+function nextMonthOf(yyyyMM: string): string {
+  const [y, m] = yyyyMM.split('-').map(Number) as [number, number];
+  const shifted = new Date(Date.UTC(y, m, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 /** Etiqueta legible en español para un mes yyyy-mm, p.ej. "junio de 2026". */
 export function monthLabelES(yyyyMM: string): string {
   const [y, m] = yyyyMM.split('-').map(Number) as [number, number];

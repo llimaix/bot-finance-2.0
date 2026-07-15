@@ -164,6 +164,26 @@ export function recurringForAdvisor(
   return [...fromDetected, ...confirmedMissing].sort((a, b) => b.montoTipico - a.montoTipico);
 }
 
+/**
+ * Calendario salarial de Allan: quincenal, el 15 y el ÚLTIMO día del mes,
+ * retrocedido a día hábil si cae en fin de semana. La detección trae el día
+ * MEDIANO observado (varía mes a mes: 25, 29, 30...), y con él la proyección
+ * daba por perdido un salario que aún venía (observado 25 vs pago real el 31).
+ * Aquí se reemplaza por el día calculado del mes EN CURSO.
+ */
+export function applySalaryCalendar(
+  recurrentes: ReadonlyArray<AdvisorRecurring>,
+  paydayDays: readonly [number, number],
+  todayDay: number,
+): AdvisorRecurring[] {
+  return recurrentes.map((r) => {
+    if (r.tipo !== 'ingreso' || !/salario|quincena|sueldo/i.test(r.descripcion)) return r;
+    // ≤20 = primera quincena (día ~15); >20 = fin de mes.
+    const dia = r.diaTipicoDePago <= 20 ? paydayDays[0] : paydayDays[1];
+    return { ...r, diaTipicoDePago: dia, aunVieneEsteMes: !r.yaPagadoEsteMes && dia >= todayDay };
+  });
+}
+
 function toAdvisor(
   d: RecurringPayment,
   confirmed: boolean,

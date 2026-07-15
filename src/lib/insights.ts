@@ -3,12 +3,12 @@ import type { AccountBalance } from './accounts';
 import { computeAggregates } from './aggregates';
 import { budgetProgress } from './budgets';
 import type { BudgetProgress } from './budgets';
-import { daysAgoGT, daysElapsedInMonthGT, monthPrefixGT } from './dates';
+import { daysAgoGT, daysElapsedInMonthGT, monthPrefixGT, nextPaydayAfter, paydaysOfMonth } from './dates';
 import { listAccounts, listBudgets, listRecurring, queryMonth, queryRange } from './dynamo';
 import { escapeHtml, formatQ } from './format';
 import { computeProjection } from './projection';
 import type { Projection } from './projection';
-import { detectRecurring, recurringForAdvisor } from './recurring';
+import { applySalaryCalendar, detectRecurring, recurringForAdvisor } from './recurring';
 import type { AdvisorRecurring } from './recurring';
 import type { Account, Transaction } from './types';
 
@@ -60,7 +60,14 @@ export async function loadAdvisorData(today: string, daysInCurrentMonth: number)
   const detected = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns], {
     types: ['gasto', 'ingreso'],
   });
-  const recurrentes = recurringForAdvisor(detected, knownRecurring, monthTxns, daysElapsed);
+  // Los salarios usan el calendario real (15 y fin de mes, ajustado a día
+  // hábil), no el día mediano observado — de esto depende la proyección.
+  const [q1, q2] = paydaysOfMonth(monthPrefixGT(0));
+  const recurrentes = applySalaryCalendar(
+    recurringForAdvisor(detected, knownRecurring, monthTxns, daysElapsed),
+    [Number(q1.slice(8)), Number(q2.slice(8))],
+    daysElapsed,
+  );
 
   const proyeccion = computeProjection({
     netoLiquido,
@@ -177,6 +184,8 @@ export function paydayCoachInput(data: AdvisorData) {
 
   return {
     fecha: data.today,
+    // Fecha REAL del próximo pago (15 o fin de mes, ajustado a día hábil).
+    fechaDePago: nextPaydayAfter(data.today),
     ingresoQueViene: ingresos.map((r) => ({ descripcion: r.descripcion, monto: r.montoTipico, diaTipico: r.diaTipicoDePago })),
     compromisosPendientes: {
       total: totalCompromisos,
