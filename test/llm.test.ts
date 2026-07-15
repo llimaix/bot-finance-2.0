@@ -22,10 +22,10 @@ describe('getModel', () => {
 
   it('minimax con sus env vars', () => {
     vi.stubEnv('LLM_PROVIDER', 'minimax');
-    vi.stubEnv('LLM_MODEL', 'MiniMax-M2');
+    vi.stubEnv('LLM_MODEL', 'MiniMax-M3');
     vi.stubEnv('MINIMAX_API_KEY', 'test-key');
     const model = getModel() as ModelLike;
-    expect(model.modelId).toBe('MiniMax-M2');
+    expect(model.modelId).toBe('MiniMax-M3');
     expect(model.provider).toContain('minimax');
   });
 
@@ -40,13 +40,13 @@ describe('getModel', () => {
     expect(() => getModel()).toThrow(/no soportado/);
   });
 
-  it('minimax sin LLM_MODEL ni LLM_MODEL_AGENT cae a MiniMax-M2 (default por proveedor)', () => {
+  it('minimax sin LLM_MODEL ni LLM_MODEL_AGENT cae a MiniMax-M3 (default por proveedor)', () => {
     vi.stubEnv('LLM_PROVIDER', 'minimax');
     vi.stubEnv('LLM_MODEL', '');
     vi.stubEnv('LLM_MODEL_AGENT', '');
     vi.stubEnv('MINIMAX_API_KEY', 'test-key');
-    expect((getModel() as ModelLike).modelId).toBe('MiniMax-M2');
-    expect((getAgentModel() as ModelLike).modelId).toBe('MiniMax-M2');
+    expect((getModel() as ModelLike).modelId).toBe('MiniMax-M3');
+    expect((getAgentModel() as ModelLike).modelId).toBe('MiniMax-M3');
   });
 });
 

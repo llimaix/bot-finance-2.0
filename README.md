@@ -110,9 +110,9 @@ El único punto de acoplamiento es `src/lib/ai/llm.ts` (LLM) y `src/lib/stt/inde
 **Pasar a MiniMax (ya soportado):**
 
 1. Secret nuevo: `MINIMAX_API_KEY` (key de [platform.minimax.io](https://platform.minimax.io)).
-2. Variable del environment: `LLM_PROVIDER=minimax` — los modelos caen solos a `MiniMax-M2` (texto y agente).
-3. **Visión**: MiniMax-M2 es solo texto. Para seguir leyendo fotos de comprobantes agrega `LLM_PROVIDER_VISION=anthropic` (usa `claude-haiku-4-5`; centavos al mes, requiere un mínimo de crédito Anthropic). Sin esto, las fotos intentarán ir a MiniMax.
-4. Relanza el workflow (o push a `main`). Para volver a Claude, borra/cambia las variables.
+2. Variable del environment: `LLM_PROVIDER=minimax` — los modelos caen solos a `MiniMax-M3` (multimodal: cubre texto, agente **y fotos de comprobantes**; $0.30/$1.20 por millón de tokens, ~10× más barato que sonnet).
+3. Relanza el workflow (o push a `main`). Para volver a Claude, borra/cambia la variable.
+4. Opcional: `LLM_PROVIDER_VISION`/`LLM_MODEL_VISION` permiten mandar solo las fotos a otro proveedor (p.ej. `anthropic`/haiku) si algún modelo de texto elegido no acepta imágenes.
 
 **Visibilidad de costos**: cada llamada al LLM queda en los logs como `uso LLM` con `fn`, `model`, `inputTokens` y `outputTokens`. Para ver el consumo por función en CloudWatch Logs Insights:
 

@@ -14,8 +14,8 @@ import { logger } from '../logger';
  *                         (modelos default: haiku para trabajo, sonnet para el agente)
  *
  *   MiniMax:              LLM_PROVIDER=minimax + secret MINIMAX_API_KEY
- *                         (modelo default: MiniMax-M2 para todo; es SOLO texto —
- *                         para comprobantes usa LLM_PROVIDER_VISION=anthropic)
+ *                         (modelo default: MiniMax-M3 para todo — es multimodal,
+ *                         cubre también las fotos de comprobantes)
  *
  *   Otros compatibles con OpenAI (DeepSeek, Kimi, etc.): copiar el case de
  *   minimax cambiando name/baseURL/env de la key.
