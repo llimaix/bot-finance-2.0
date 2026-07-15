@@ -129,8 +129,9 @@ export class FinanzasStack extends Stack {
     // ── Permisos mínimos ───────────────────────────────────────────────────
     table.grantReadWriteData(webhookFn); // solo el item de dedupe
     table.grantReadWriteData(processorFn);
-    table.grantReadData(reminderFn);
-    table.grantReadData(monthlyFn);
+    // reminder y monthly también escriben: acumulan su consumo de IA (USAGE#).
+    table.grantReadWriteData(reminderFn);
+    table.grantReadWriteData(monthlyFn);
 
     processorFn.addToRolePolicy(
       new iam.PolicyStatement({

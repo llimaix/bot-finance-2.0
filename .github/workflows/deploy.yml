@@ -53,6 +53,20 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Eval GOLDEN contra el modelo real: 16 casos de conversaciones reales de
+      # producción (~$0.05 en MiniMax). No bloquea el deploy todavía — M3 tiene
+      # picos de latencia que darían falsos rojos; promover a bloqueante cuando
+      # se pruebe estable. Un ❌ aquí = revisar antes de confiar en el deploy.
+      - name: Eval golden del agente (no bloqueante)
+        continue-on-error: true
+        run: pnpm tsx scripts/eval-agent.ts
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_MODEL_AGENT: ${{ vars.LLM_MODEL_AGENT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           # Acepta el ARN como variable o como secret del environment

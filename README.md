@@ -52,6 +52,7 @@ EventBridge Scheduler (hora de Guatemala)
 | `/saldo` | Saldos por cuenta (BI, Banrural, tarjeta, efectivo, kash) + neto líquido. Ajusta semillas: `/saldo efectivo 350` |
 | `/proyeccion` | Disponible proyectado a fin de mes: neto + ingresos confirmados que faltan − compromisos pendientes − gasto variable proyectado (todo calculado en código) |
 | `/metas` | Metas de gasto por categoría con semáforo 🟢🟡🔴. `/metas sugerir` propone topes desde tu historial (confirmas por botones); `/metas comida 1500` fija directo; también por chat: "ponme meta de Q1,500 en comida" |
+| `/costo` | Cuánto ha costado la IA este mes: tokens por modelo y función + USD estimado (acumulador en DynamoDB alimentado por cada llamada) |
 | `/categorias` | Ver la base de conocimientos de categorías |
 | `/borrar N` | Elimina el movimiento #N de hoy (o usa el botón 🗑️ bajo cada confirmación) |
 | `corrige #N ...` | Corrige un movimiento en lenguaje natural: "corrige #2 eran Q50 con débito" |
@@ -101,7 +102,7 @@ El output `DeployRoleArn` es el ARN del rol que asumirá GitHub Actions.
 
 ### 6. Listo
 
-Cada push a `main` corre typecheck + tests + synth y deploya. El último paso del workflow registra el webhook en Telegram automáticamente (`setWebhook` con el secret token). Mándale un mensaje al bot: *"gasté Q45 en almuerzo en efectivo"*.
+Cada push a `main` corre typecheck + tests + synth, el **eval golden del agente contra el modelo real** (16 casos de conversaciones reales; no bloqueante mientras se prueba la estabilidad del proveedor) y deploya. El último paso del workflow registra el webhook en Telegram automáticamente (`setWebhook` con el secret token). Mándale un mensaje al bot: *"gasté Q45 en almuerzo en efectivo"*.
 
 ## Cambiar de proveedor de IA (sin tocar código)
 

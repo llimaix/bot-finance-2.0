@@ -2,6 +2,8 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import { config } from '../config';
+import { monthPrefixGT } from '../dates';
+import { addUsage } from '../dynamo';
 import { logger } from '../logger';
 
 /**
@@ -85,12 +87,21 @@ export function logUsage(
   usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined,
   extra: Record<string, unknown> = {},
 ): void {
+  const inputTokens = usage?.inputTokens ?? 0;
+  const outputTokens = usage?.outputTokens ?? 0;
   logger.info('uso LLM', {
     fn,
     model: modelId,
-    inputTokens: usage?.inputTokens ?? 0,
-    outputTokens: usage?.outputTokens ?? 0,
+    inputTokens,
+    outputTokens,
     totalTokens: usage?.totalTokens ?? 0,
     ...extra,
   });
+  // Acumulador del mes para /costo. Fire-and-forget: contar tokens jamás debe
+  // tumbar una respuesta; fuera de Lambda (eval, local) no hay tabla y se omite.
+  if (process.env.TABLE_NAME && (inputTokens > 0 || outputTokens > 0)) {
+    addUsage(monthPrefixGT(0), fn, modelId, inputTokens, outputTokens).catch((err) =>
+      logger.error('no se pudo acumular el uso', { error: String(err) }),
+    );
+  }
 }

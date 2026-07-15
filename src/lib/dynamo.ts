@@ -249,6 +249,40 @@ export async function putRecurring(record: RecurringRecord): Promise<void> {
   logger.info('recurrente actualizado', { slug: record.slug, status: record.status });
 }
 
+// ── Contabilidad de tokens de IA (item USAGE#<yyyy-mm>) ────────────────────
+
+/** Suma atómica del consumo de una llamada LLM al mes en curso. */
+export async function addUsage(
+  month: string,
+  fn: string,
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+): Promise<void> {
+  await doc.send(
+    new UpdateCommand({
+      TableName: config.tableName,
+      Key: { PK, SK: `USAGE#${month}` },
+      UpdateExpression:
+        'ADD inTokens :i, outTokens :o, calls :one, #mi :i, #mo :o, #fi :i, #fo :o',
+      ExpressionAttributeNames: {
+        '#mi': `m_in::${model}`,
+        '#mo': `m_out::${model}`,
+        '#fi': `f_in::${fn}`,
+        '#fo': `f_out::${fn}`,
+      },
+      ExpressionAttributeValues: { ':i': inputTokens, ':o': outputTokens, ':one': 1 },
+    }),
+  );
+}
+
+export async function getUsage(month: string): Promise<Record<string, unknown> | undefined> {
+  const res = await doc.send(
+    new GetCommand({ TableName: config.tableName, Key: { PK, SK: `USAGE#${month}` } }),
+  );
+  return res.Item;
+}
+
 // ── Metas de gasto por categoría (items BUD#<categoria>) ──────────────────
 
 export async function listBudgets(): Promise<BudgetRecord[]> {

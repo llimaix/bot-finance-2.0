@@ -80,6 +80,10 @@ describe('matchCommand', () => {
     expect(matchCommand('/metas comida -50')).toEqual({ kind: 'metas', action: { op: 'ver' }, invalidArgs: true });
   });
 
+  it('/costo consulta el consumo de IA', () => {
+    expect(matchCommand('/costo')).toEqual({ kind: 'costo' });
+  });
+
   it('start/help/ayuda → ayuda', () => {
     expect(matchCommand('/start')).toEqual({ kind: 'ayuda' });
     expect(matchCommand('/help')).toEqual({ kind: 'ayuda' });

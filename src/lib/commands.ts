@@ -14,6 +14,7 @@ export type Command =
   | { kind: 'export' }
   | { kind: 'saldo'; set: { account: AccountId; amount: number } | null; invalidArgs: boolean }
   | { kind: 'metas'; action: MetasAction; invalidArgs: boolean }
+  | { kind: 'costo' }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'ayuda' };
 
@@ -24,7 +25,7 @@ export type MetasAction =
   | { op: 'quitar'; category: string };
 
 const COMMAND_RE =
-  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|costo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -51,6 +52,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'memoria' };
     case 'proyeccion':
       return { kind: 'proyeccion' };
+    case 'costo':
+      return { kind: 'costo' };
     case 'export':
       return { kind: 'export' };
     case 'saldo': {
@@ -119,6 +122,7 @@ export const HELP_TEXT = [
   '/saldo — cuánto tienes en cada cuenta (ajusta con: /saldo efectivo 350)',
   '/proyeccion — cuánto te quedará a fin de mes (ingresos y compromisos pendientes)',
   '/metas — metas de gasto por categoría (/metas sugerir, /metas comida 1500)',
+  '/costo — cuánto ha costado la IA este mes (tokens y USD estimado)',
   '/recurrentes — tus gastos recurrentes aprendidos y por confirmar',
   '/memoria — los hechos que el agente ha aprendido de ti',
   '/export — el mes en curso como archivo CSV',
@@ -140,6 +144,7 @@ export const BOT_COMMANDS = [
   { command: 'saldo', description: 'Saldos de tus cuentas' },
   { command: 'proyeccion', description: 'Disponible proyectado a fin de mes' },
   { command: 'metas', description: 'Metas de gasto por categoría' },
+  { command: 'costo', description: 'Costo de la IA este mes' },
   { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
   { command: 'memoria', description: 'Hechos que el agente aprendió de ti' },
   { command: 'export', description: 'Exportar el mes en curso como CSV' },

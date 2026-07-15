@@ -11,6 +11,7 @@ import { registrationWarnings } from './guards';
 import { loadAdvisorData, loadBalancesReadonly, renderProjection } from './insights';
 import { detectRecurring, findNewCandidates } from './recurring';
 import { summarizeSearch } from './search';
+import { renderCosto, summarizeUsage } from './usage';
 import type { RecurringPayment } from './recurring';
 import { HELP_TEXT, matchCommand, matchCorrection } from './commands';
 import type { Command } from './commands';
@@ -25,6 +26,7 @@ import {
   getLastRecurringAskAt,
   getOrSeedAccounts,
   getTransaction,
+  getUsage,
   listBudgets,
   listCategories,
   listFacts,
@@ -129,6 +131,24 @@ async function rememberExchange(userText: string, assistantText: string): Promis
   ]).catch((err) => logger.error('no se pudo guardar la conversación', { error: String(err) }));
 }
 
+/**
+ * Mantiene vivo el "escribiendo…" de Telegram mientras corre trabajo largo
+ * (el chat action expira a los ~5s; M3 puede razonar 30-90s y sin esto el
+ * bot parece muerto). El intervalo SIEMPRE se limpia: un timer vivo colgaría
+ * la invocación de Lambda.
+ */
+async function withTyping<T>(chatId: number, work: () => Promise<T>): Promise<T> {
+  await sendTyping(chatId).catch(() => undefined);
+  const interval = setInterval(() => {
+    sendTyping(chatId).catch(() => undefined);
+  }, 5_000);
+  try {
+    return await work();
+  } finally {
+    clearInterval(interval);
+  }
+}
+
 // ── Ruteo de mensajes ──────────────────────────────────────────────────────
 
 async function route(message: TelegramMessage): Promise<void> {
@@ -143,11 +163,10 @@ async function route(message: TelegramMessage): Promise<void> {
   const photo = message.photo?.at(-1);
   const imageDoc = message.document?.mime_type?.startsWith('image/') ? message.document : undefined;
   if (photo || imageDoc) {
-    await sendTyping(chatId);
     const fileId = photo?.file_id ?? imageDoc!.file_id;
     const mediaType = imageDoc?.mime_type ?? 'image/jpeg';
     const image = await getFileBuffer(fileId);
-    const outcome = await parseReceipt(image, mediaType, message.caption ?? null);
+    const outcome = await withTyping(chatId, () => parseReceipt(image, mediaType, message.caption ?? null));
 
     // Auditoría: lo que la visión leyó queda en el movimiento (responde "¿qué leíste?")
     const vision =
@@ -164,9 +183,10 @@ async function route(message: TelegramMessage): Promise<void> {
   }
 
   if (message.voice) {
-    await sendTyping(chatId);
     const audio = await getFileBuffer(message.voice.file_id);
-    const transcript = await getSttProvider().transcribe(audio, message.voice.mime_type);
+    const transcript = await withTyping(chatId, () =>
+      getSttProvider().transcribe(audio, message.voice!.mime_type),
+    );
     await agentFlow(chatId, today, transcript, transcript);
     return;
   }
@@ -334,7 +354,7 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
 
   // Con la arquitectura asíncrona el presupuesto es holgado (processor: 180s).
   // MiniMax-M3 razona largo: los picos de latencia superan los 45s.
-  const result = await runAgent(userText, history, deps, { timeoutMs: 90_000 });
+  const result = await withTyping(chatId, () => runAgent(userText, history, deps, { timeoutMs: 90_000 }));
 
   const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
   let reply = `${heard}${escapeHtml(result.text)}`;
@@ -816,6 +836,13 @@ async function handleCommand(chatId: number, today: string, command: Command): P
     case 'proyeccion': {
       const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
       await sendMessage(chatId, renderProjection(data));
+      return;
+    }
+
+    case 'costo': {
+      const month = monthPrefixGT(0);
+      const item = await getUsage(month);
+      await sendMessage(chatId, renderCosto(summarizeUsage(item), monthLabelES(month)));
       return;
     }
 
