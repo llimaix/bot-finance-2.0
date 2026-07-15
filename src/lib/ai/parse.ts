@@ -22,8 +22,10 @@ import { parseResultSchema, parsedTransactionSchema } from './schema';
 
 // Topes TOTALES por llamada (incluyen los reintentos del SDK). Con la
 // arquitectura asíncrona corren en el processor (120s): holgados a propósito.
+// Visión: MiniMax-M3 razona largo sobre imágenes — el tope de 30s cortó el
+// primer comprobante en producción (14-jul, 32.8s).
 const LLM_TIMEOUT_MS = 20_000;
-const VISION_TIMEOUT_MS = 30_000;
+const VISION_TIMEOUT_MS = 75_000;
 
 /** Movimiento parseado con su fecha efectiva ya resuelta (retroactivas incluidas). */
 export interface DatedTransaction extends ParsedTransaction {

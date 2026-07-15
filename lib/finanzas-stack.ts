@@ -89,7 +89,9 @@ export class FinanzasStack extends Stack {
     // instante; el trabajo real (agente, visión, voz) corre en el processor
     // con 2 minutos de presupuesto — los timeouts del HTTP API dejan de existir.
     const processorFn = fn('ProcessorFn', 'src/handlers/processor.ts', {
-      timeout: Duration.seconds(120),
+      // 180s: MiniMax-M3 tiene latencia variable (razona largo); el costo de
+      // Lambda es por ms usado, el tope alto no cuesta nada si no se usa.
+      timeout: Duration.seconds(180),
       env: {
         TELEGRAM_WEBHOOK_SECRET: secrets.TELEGRAM_WEBHOOK_SECRET,
         ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY,

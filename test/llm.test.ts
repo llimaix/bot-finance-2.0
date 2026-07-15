@@ -92,4 +92,10 @@ describe('stripThinking', () => {
   it('texto sin tags pasa intacto', () => {
     expect(stripThinking('  Listo, Q45 registrados.  ')).toBe('Listo, Q45 registrados.');
   });
+
+  it('variante con namespace <mm:think> y cierre huérfano', () => {
+    expect(stripThinking('<mm:think>razono</mm:think>Listo.')).toBe('Listo.');
+    expect(stripThinking('</mm:think>¿Me reenvías la foto?')).toBe('¿Me reenvías la foto?');
+    expect(stripThinking('Anotado.<mm:think>truncado sin cierre')).toBe('Anotado.');
+  });
 });

@@ -67,6 +67,30 @@ const CASES: GoldenCase[] = [
     expectTools: ['fijar_meta'],
     forbidTools: ['registrar_movimientos', 'recordar_dato'],
   },
+  // Incidente 14-jul (2): tras fallar una FOTO por timeout, "Intenta de nuevo"
+  // debe pedir el reenvío de la foto — el agente no puede verla, y NO debe
+  // re-ejecutar acciones viejas de la memoria (re-marcó "sin movimientos").
+  {
+    name: 'reintento tras foto fallida pide reenvío (incidente 14-jul)',
+    user: 'Intenta de nuevo',
+    history: [
+      { role: 'user', text: 'hoy nada', at: '2026-07-12T23:14:00Z' },
+      { role: 'assistant', text: 'Listo, marqué hoy sin movimientos.', at: '2026-07-12T23:14:10Z' },
+      {
+        role: 'user',
+        text: '[📷 foto de comprobante] Realicé este pago con mi tarjeta de débito, corresponde al API de MiniMax',
+        at: '2026-07-13T02:07:00Z',
+      },
+      {
+        role: 'assistant',
+        text: '[FALLÓ con este error] ⏳ Me tardé más de la cuenta pensando en eso y lo corté. Inténtalo de nuevo, o divídelo en partes más pequeñas.',
+        at: '2026-07-13T02:08:00Z',
+      },
+    ],
+    expectTools: [],
+    forbidTools: ['dia_sin_movimientos', 'registrar_movimientos', 'corregir_movimiento', 'eliminar_movimiento'],
+    check: () => null,
+  },
   // Incidente 13-jul: pagos en dólares (Anthropic $100/mes). El agente registra
   // con currency USD y el CÓDIGO convierte a Q — nunca debe quedar Q100.
   // Incidente 14-jul: tras aclarar la ambigüedad, "hoy no hice movimientos" debe
@@ -251,7 +275,7 @@ async function main() {
     let reply = '';
     let error: string | null = null;
     try {
-      const result = await runAgent(c.user, c.history ?? [], buildDeps(called, inputs, { recent: c.recent }), { timeoutMs: 45_000 });
+      const result = await runAgent(c.user, c.history ?? [], buildDeps(called, inputs, { recent: c.recent }), { timeoutMs: 90_000 });
       reply = result.text;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);

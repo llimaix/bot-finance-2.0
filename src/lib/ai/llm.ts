@@ -66,9 +66,12 @@ export function getVisionModel(): LanguageModel {
  * sin cerrar (salida truncada), se corta desde ahí.
  */
 export function stripThinking(text: string): string {
-  let out = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  const unclosed = out.search(/<think>/i);
+  // Cubre variantes con namespace: <think>, <mm:think>, etc.
+  let out = text.replace(/<([\w:]*think)>[\s\S]*?<\/\1>/gi, '');
+  const unclosed = out.search(/<[\w:]*think>/i);
   if (unclosed >= 0) out = out.slice(0, unclosed);
+  // Tags de cierre huérfanos (el de apertura quedó en otro paso del loop).
+  out = out.replace(/<\/[\w:]*think>/gi, '');
   return out.trim();
 }
 

@@ -84,11 +84,28 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
     });
-    await sendMessage(senderId, friendlyError(err)).catch((sendErr) =>
+    const errorReply = friendlyError(err);
+    await sendMessage(senderId, errorReply).catch((sendErr) =>
       logger.error('no se pudo enviar el mensaje de error', { error: String(sendErr) }),
     );
+    // El fallo QUEDA en la memoria conversacional: sin esto, un "intenta de
+    // nuevo" posterior re-ejecuta lo último que el agente sí recuerda
+    // (incidente 14-jul: re-marcó "sin movimientos" tras fallar una foto).
+    if (message) {
+      await rememberExchange(describeMessage(message), `[FALLÓ con este error] ${errorReply}`);
+    }
     if (callback) await answerCallbackQuery(callback.id).catch(() => undefined);
   }
+}
+
+/** Resumen best-effort de un mensaje para la memoria (el error pudo ocurrir
+ *  antes de transcribir/leer, así que se describe lo que se RECIBIÓ). */
+function describeMessage(message: TelegramMessage): string {
+  if (message.photo || message.document?.mime_type?.startsWith('image/')) {
+    return `[📷 foto de comprobante]${message.caption ? ` ${message.caption}` : ''}`;
+  }
+  if (message.voice) return '[🎙️ nota de voz]';
+  return message.text ?? '[mensaje]';
 }
 
 /** Errores con cara: el usuario merece saber qué pasó, no un ⚠️ genérico. */
@@ -315,8 +332,9 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     },
   };
 
-  // Con la arquitectura asíncrona el presupuesto es holgado (processor: 120s).
-  const result = await runAgent(userText, history, deps, { timeoutMs: 45_000 });
+  // Con la arquitectura asíncrona el presupuesto es holgado (processor: 180s).
+  // MiniMax-M3 razona largo: los picos de latencia superan los 45s.
+  const result = await runAgent(userText, history, deps, { timeoutMs: 90_000 });
 
   const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
   let reply = `${heard}${escapeHtml(result.text)}`;
