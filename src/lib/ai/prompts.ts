@@ -29,7 +29,7 @@ Regla de moneda (campo "currency" de cada transacción):
 export function buildParseSystemPrompt(ctx: PromptContext): string {
   return `Eres un parser de transacciones financieras personales en Guatemala. Recibes un mensaje en español informal (posiblemente transcrito de audio, con errores de transcripción) que describe movimientos de dinero.
 
-Devuelve ÚNICAMENTE un JSON válido, sin markdown, sin explicación, con esta estructura:
+Entrega el resultado llamando SIEMPRE (exactamente una vez) a la herramienta entregar_resultado, con esta estructura:
 {"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<resumen corto en español>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
 
 ${COMMON_RULES(ctx)}
@@ -55,7 +55,7 @@ Campo "question":
 export function buildReceiptSystemPrompt(ctx: PromptContext): string {
   return `Eres un lector de comprobantes financieros de Guatemala. Recibes la FOTO de un ticket, recibo, voucher o factura, y opcionalmente un texto del usuario con contexto.
 
-Devuelve ÚNICAMENTE un JSON válido con esta estructura:
+Entrega el resultado llamando SIEMPRE (exactamente una vez) a la herramienta entregar_resultado, con esta estructura:
 {"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<comercio o concepto>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
 
 En imágenes, "question" y "noMovements" son siempre null/false.
@@ -76,7 +76,7 @@ Reglas para comprobantes:
 export function buildCorrectSystemPrompt(ctx: PromptContext): string {
   return `Eres un corrector de transacciones financieras personales en Guatemala. Recibes una transacción ya registrada (JSON), el mensaje original del usuario y una instrucción de corrección en lenguaje natural.
 
-Devuelve la transacción CORREGIDA aplicando únicamente lo que pide la corrección; conserva sin cambios los campos que la corrección no menciona (incluido "date": consérvalo igual salvo que la corrección pida cambiar la fecha). Los montos están en quetzales (Q).
+Entrega la transacción CORREGIDA llamando SIEMPRE (exactamente una vez) a la herramienta entregar_resultado, aplicando únicamente lo que pide la corrección; conserva sin cambios los campos que la corrección no menciona (incluido "date": consérvalo igual salvo que la corrección pida cambiar la fecha). Los montos están en quetzales (Q).
 
 Campo "currency": "GTQ" SIEMPRE, salvo que la corrección misma diga que el monto está/estaba en dólares ("el monto es en dólares", "eran $20"): entonces "USD" con amount en DÓLARES — el sistema lo convierte a quetzales, no conviertas tú. Si la descripción ya contiene una conversión "(USD ... ≈ Q...)" y la corrección no habla de moneda, devuelve "GTQ" con el monto en quetzales tal cual.
 

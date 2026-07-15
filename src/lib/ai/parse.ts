@@ -1,4 +1,5 @@
-import { Output, generateText } from 'ai';
+import { generateText, tool } from 'ai';
+import type { LanguageModel, ModelMessage } from 'ai';
 import type { z } from 'zod';
 import { emojiMapFrom, resolveCategory } from '../categories';
 import { config } from '../config';
@@ -21,11 +22,50 @@ import type { PromptContext } from './prompts';
 import { parseResultSchema, parsedTransactionSchema } from './schema';
 
 // Topes TOTALES por llamada (incluyen los reintentos del SDK). Con la
-// arquitectura asíncrona corren en el processor (120s): holgados a propósito.
+// arquitectura asíncrona corren en el processor (180s): holgados a propósito.
 // Visión: MiniMax-M3 razona largo sobre imágenes — el tope de 30s cortó el
 // primer comprobante en producción (14-jul, 32.8s).
-const LLM_TIMEOUT_MS = 20_000;
+const LLM_TIMEOUT_MS = 30_000;
 const VISION_TIMEOUT_MS = 75_000;
+
+/**
+ * Extracción estructurada vía TOOL CALL forzado — el mecanismo más portable
+ * entre proveedores. Output.object (JSON en modo texto) se rompe con los
+ * modelos razonadores servidos por API OpenAI-compatible: MiniMax-M3 envuelve
+ * el JSON en <think> y el parser del SDK no lo encuentra (incidente 14-jul);
+ * los tool calls nativos llegan como JSON limpio y validado contra el schema.
+ */
+async function extractWithTool<SCHEMA extends z.ZodType>(opts: {
+  fn: string;
+  model: LanguageModel;
+  modelId: string;
+  system: string;
+  schema: SCHEMA;
+  timeout: number;
+  prompt?: string;
+  messages?: ModelMessage[];
+}): Promise<z.infer<SCHEMA>> {
+  const result = await generateText({
+    model: opts.model,
+    system: opts.system,
+    ...(opts.prompt !== undefined ? { prompt: opts.prompt } : { messages: opts.messages! }),
+    tools: {
+      entregar_resultado: tool({
+        description: 'Entrega el resultado estructurado. Llámala SIEMPRE, exactamente una vez.',
+        inputSchema: opts.schema,
+      }),
+    },
+    toolChoice: 'required',
+    temperature: 0,
+    timeout: opts.timeout,
+  });
+  logUsage(opts.fn, opts.modelId, result.usage);
+  const input = result.toolCalls.at(-1)?.input;
+  if (input === undefined) {
+    throw new Error(`El modelo no entregó el resultado estructurado (${opts.fn})`);
+  }
+  return input as z.infer<SCHEMA>;
+}
 
 /** Movimiento parseado con su fecha efectiva ya resuelta (retroactivas incluidas). */
 export interface DatedTransaction extends ParsedTransaction {
@@ -109,20 +149,20 @@ export async function materializeParsed(raw: {
 export async function parseTransactions(text: string): Promise<ParseOutcome> {
   const { ctx, catalog, known } = await loadPromptContext();
 
-  const result = await generateText({
+  const raw = await extractWithTool({
+    fn: 'parseTransactions',
     model: getModel(),
+    modelId: config.llmModel,
     system: buildParseSystemPrompt(ctx),
     prompt: text,
-    temperature: 0,
+    schema: parseResultSchema,
     timeout: LLM_TIMEOUT_MS,
-    output: Output.object({ schema: parseResultSchema }),
   });
 
-  const outcome = toOutcome(result.output, catalog, known, ctx.today);
-  logUsage('parseTransactions', config.llmModel, result.usage);
+  const outcome = toOutcome(raw, catalog, known, ctx.today);
   logger.info('parseo completado', {
     rawMessage: text,
-    parsed: result.output,
+    parsed: raw,
     createdCategories: outcome.createdCategories,
   });
   return outcome;
@@ -136,9 +176,11 @@ export async function parseReceipt(
 ): Promise<ParseOutcome> {
   const { ctx, catalog, known } = await loadPromptContext();
 
-  const result = await generateText({
-    // Modelo de VISIÓN: separable del principal (MiniMax-M2 es solo texto).
+  const raw = await extractWithTool({
+    fn: 'parseReceipt',
+    // Modelo de VISIÓN: separable del principal por si el de texto no ve imágenes.
     model: getVisionModel(),
+    modelId: config.llmModelVision,
     system: buildReceiptSystemPrompt(ctx),
     messages: [
       {
@@ -154,17 +196,15 @@ export async function parseReceipt(
         ],
       },
     ],
-    temperature: 0,
+    schema: parseResultSchema,
     timeout: VISION_TIMEOUT_MS,
-    output: Output.object({ schema: parseResultSchema }),
   });
 
-  const outcome = toOutcome(result.output, catalog, known, ctx.today);
-  logUsage('parseReceipt', config.llmModelVision, result.usage);
+  const outcome = toOutcome(raw, catalog, known, ctx.today);
   logger.info('comprobante procesado', {
     caption,
     imageBytes: image.length,
-    parsed: result.output,
+    parsed: raw,
     createdCategories: outcome.createdCategories,
   });
   return outcome;
@@ -191,17 +231,18 @@ export async function correctTransaction(
     `Corrección solicitada: "${correctionText}"`,
   ].join('\n');
 
-  const result = await generateText({
+  const output = await extractWithTool({
+    fn: 'correctTransaction',
     model: getModel(),
+    modelId: config.llmModel,
     system: buildCorrectSystemPrompt(ctx),
     prompt,
-    temperature: 0,
+    schema: parsedTransactionSchema,
     timeout: LLM_TIMEOUT_MS,
-    output: Output.object({ schema: parsedTransactionSchema }),
   });
 
   // USD → Q en código ("el monto es en dólares" convierte, no solo renombra).
-  const rawCorrected = toQuetzales(result.output, config.usdGtqRate);
+  const rawCorrected = toQuetzales(output, config.usdGtqRate);
   if (!Number.isFinite(rawCorrected.amount) || rawCorrected.amount <= 0) {
     throw new Error(`Corrección con monto inválido: ${rawCorrected.amount}`);
   }
@@ -212,7 +253,6 @@ export async function correctTransaction(
   const { date: _date, ...fields } = rawCorrected;
   const corrected: ParsedTransaction = { ...fields, category: resolved.name };
 
-  logUsage('correctTransaction', config.llmModel, result.usage);
   logger.info('corrección completada', { original: visible, correctionText, corrected });
   return {
     corrected,
