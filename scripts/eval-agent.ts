@@ -28,8 +28,8 @@ interface GoldenCase {
   expectTools: string[];
   /** Herramientas que NO debe llamar. */
   forbidTools?: string[];
-  /** Validación extra sobre los inputs de las herramientas (null = OK). */
-  check?: (inputs: Record<string, unknown[]>) => string | null;
+  /** Validación extra sobre los inputs de las herramientas y la respuesta (null = OK). */
+  check?: (inputs: Record<string, unknown[]>, reply: string) => string | null;
   /** Movimientos recientes en el contexto ('completo' = ayer y hoy, default). */
   recent?: 'completo' | 'solo-ayer';
   /** Historia previa de la conversación (memoria CONV), para casos multi-turno. */
@@ -113,6 +113,40 @@ const CASES: GoldenCase[] = [
     expectTools: ['dia_sin_movimientos'],
     forbidTools: ['registrar_movimientos', 'corregir_movimiento', 'eliminar_movimiento'],
     recent: 'solo-ayer',
+  },
+  // Incidente 15-jul: pregunta de DECISIÓN ("¿pago el 16 o espero al límite?")
+  // respondida con un volcado de estatus (imitó el formato de una respuesta
+  // anterior en la memoria). La respuesta debe ser una RECOMENDACIÓN.
+  {
+    name: 'decisión de pago de tarjeta responde la pregunta (incidente 15-jul)',
+    user: 'la pregunta es si pago el 16 o si espero una fecha mas proxima a mi fecha de pago limite que es el 8?',
+    history: [
+      { role: 'user', text: 'Dame mi estatus', at: '2026-07-11T03:29:00Z' },
+      {
+        role: 'assistant',
+        text: '📊 Tu estatus al 11 de julio de 2026\n\nSaldos\n• Banco Industrial (BI): Q716.66\n• Banrural: Q40.00\n• Tarjeta BAC: -Q5,026.07\n\nNeto líquido: -Q3,824.41',
+        at: '2026-07-11T03:29:30Z',
+      },
+      {
+        role: 'user',
+        text: 'necesito un consejo financiero: mi fecha de corte de la tarjeta es el 15 (hoy) y mi fecha límite de pago es el 8, ¿me recomiendas pagar mañana ya que tengo liquidez?',
+        at: '2026-07-12T17:52:00Z',
+      },
+      {
+        role: 'assistant',
+        text: 'Te recomiendo pagar mañana 16. Paga el total para no generar intereses.',
+        at: '2026-07-12T17:52:30Z',
+      },
+    ],
+    expectTools: [],
+    forbidTools: ['registrar_movimientos', 'dia_sin_movimientos'],
+    check: (_inputs, reply) => {
+      if (/tu estatus/i.test(reply)) return 'respondió con un volcado de estatus en vez de la decisión';
+      if (!/recomiendo|conviene|mejor|yo pagar|paga el|espera|apart/i.test(reply)) {
+        return `no se lee una recomendación clara: "${reply.slice(0, 120)}"`;
+      }
+      return null;
+    },
   },
   {
     name: 'pago en dólares registra en USD',
@@ -286,7 +320,7 @@ async function main() {
 
     const missing = c.expectTools.filter((t) => !called.includes(t));
     const forbidden = (c.forbidTools ?? []).filter((t) => called.includes(t));
-    const checkError = error ? null : (c.check?.(inputs) ?? null);
+    const checkError = error ? null : (c.check?.(inputs, reply) ?? null);
     const pass = !error && missing.length === 0 && forbidden.length === 0 && !checkError && reply.length > 0;
     if (!pass) failures += 1;
 

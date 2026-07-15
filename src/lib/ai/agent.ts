@@ -244,7 +244,7 @@ export async function runAgent(
         {
           role: 'user' as const,
           content:
-            'Entrégame la respuesta completa AHORA, usando las herramientas que hagan falta. No me pidas esperar y no respondas vacío.',
+            'Responde AHORA directamente lo que te pregunté, usando las herramientas que hagan falta. Si es una decisión, empieza con tu recomendación y sus razones. No me pidas esperar, no respondas vacío y no me des un volcado de datos.',
         },
       ],
       60_000,
