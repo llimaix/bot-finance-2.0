@@ -55,10 +55,13 @@ const CASES: GoldenCase[] = [
   // Incidente 11-jul: reconciliar NO es registrar. El usuario re-explica para qué
   // fueron los dos retiros que YA están registrados (ver contexto); el agente debe
   // consultar/responder, NUNCA crear "préstamo" ni "salida" como gastos nuevos.
+  // Lo que guarda este caso es NO registrar duplicados; responder el saldo
+  // puede salir de consultar_datos O del contexto (los saldos van frescos en
+  // el system prompt), así que no se exige la herramienta.
   {
     name: 'reconciliación no duplica (incidente 11-jul)',
     user: 'Pongámonos en orden con lo de ayer: esos dos retiros de mil que ya tenés anotados, uno fue para prestarle a mamá y el otro para la salida con amigos. Solo quiero cuadrar, ¿cómo me quedó el efectivo?',
-    expectTools: ['consultar_datos'],
+    expectTools: [],
     forbidTools: ['registrar_movimientos'],
   },
   {

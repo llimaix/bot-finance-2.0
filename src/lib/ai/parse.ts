@@ -269,7 +269,7 @@ export async function answerQuestion(question: string, snapshot: unknown): Promi
     prompt: `Pregunta: ${question}\n\nSnapshot: ${JSON.stringify(snapshot)}`,
     temperature: 0,
     timeout: LLM_TIMEOUT_MS,
-    maxOutputTokens: 400,
+    maxOutputTokens: 2000,
   });
   logUsage('answerQuestion', config.llmModel, result.usage);
   return stripThinking(result.text);
@@ -285,7 +285,7 @@ export async function coachNarrative(kind: 'weekly' | 'payday', input: unknown):
     system: kind === 'weekly' ? COACH_WEEKLY_SYSTEM_PROMPT : COACH_PAYDAY_SYSTEM_PROMPT,
     prompt: JSON.stringify(input),
     timeout: 30_000,
-    maxOutputTokens: 600,
+    maxOutputTokens: 2500,
   });
   logUsage(`coach:${kind}`, config.llmModelAgent, result.usage);
   return stripThinking(result.text);
@@ -298,7 +298,7 @@ export async function narrateReport(aggregates: unknown): Promise<string> {
     system: NARRATE_SYSTEM_PROMPT,
     prompt: JSON.stringify(aggregates),
     timeout: 30_000,
-    maxOutputTokens: 1500,
+    maxOutputTokens: 3000,
   });
   logUsage('narrateReport', config.llmModel, result.usage);
   return stripThinking(result.text);

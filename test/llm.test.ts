@@ -99,3 +99,18 @@ describe('stripThinking', () => {
     expect(stripThinking('Anotado.<mm:think>truncado sin cierre')).toBe('Anotado.');
   });
 });
+
+describe('ANNOUNCE_RE (anuncio sin acción)', () => {
+  it('detecta promesas vacías', async () => {
+    const { ANNOUNCE_RE } = await import('../src/lib/ai/agent');
+    expect(ANNOUNCE_RE.test('⌛ Espera un momento, estoy consultando tus datos.')).toBe(true);
+    expect(ANNOUNCE_RE.test('Déjame revisar tus movimientos')).toBe(true);
+    expect(ANNOUNCE_RE.test('Voy a consultar tu saldo')).toBe(true);
+  });
+
+  it('no confunde respuestas reales', async () => {
+    const { ANNOUNCE_RE } = await import('../src/lib/ai/agent');
+    expect(ANNOUNCE_RE.test('Tenés Q2,101.01 en BI y Q40 en Banrural.')).toBe(false);
+    expect(ANNOUNCE_RE.test('Listo, registré tus Q45 de almuerzo.')).toBe(false);
+  });
+});

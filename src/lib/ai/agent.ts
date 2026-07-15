@@ -13,6 +13,16 @@ import { newCategorySchema, parsedTransactionSchema } from './schema';
 // El webhook lo ajusta según la vía: texto (más holgado) vs voz (ya gastó en transcribir).
 const DEFAULT_AGENT_TIMEOUT_MS = 20_000;
 
+/**
+ * "Anuncio sin acción": los modelos razonadores a veces responden "espera un
+ * momento, estoy consultando..." SIN llamar ninguna herramienta — el loop
+ * termina y el usuario recibe una promesa vacía (incidente 14-jul, "Dame mi
+ * estatus"). Si el texto final huele a promesa y no hubo herramientas, se
+ * reintenta UNA vez con un empujón explícito.
+ */
+export const ANNOUNCE_RE =
+  /esper[aáe]|un momento|un segundo|estoy (consultando|revisando|buscando|verificando)|voy a (consultar|revisar|buscar|verificar)|d[eé]jame (ver|revisar|consultar)/i;
+
 export interface RegisteredBatch {
   txns: Transaction[];
   createdCategories: Array<{ name: string; emoji: string }>;
@@ -76,18 +86,16 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const registered: Transaction[] = [];
 
-  const result = await generateText({
-    model: getAgentModel(),
-    system: buildAgentSystemPrompt({
-      today: deps.today,
-      weekday: weekdayGT(),
-      contextInfo: deps.contextInfo,
-    }),
-    messages: [
-      ...history.map((m) => ({ role: m.role, content: m.text })),
-      { role: 'user' as const, content: userText },
-    ],
-    tools: {
+  const system = buildAgentSystemPrompt({
+    today: deps.today,
+    weekday: weekdayGT(),
+    contextInfo: deps.contextInfo,
+  });
+  const baseMessages = [
+    ...history.map((m) => ({ role: m.role, content: m.text })),
+    { role: 'user' as const, content: userText },
+  ];
+  const agentTools = {
       registrar_movimientos: tool({
         description:
           'Registra movimientos de dinero NUEVOS de Allan (gastos, ingresos, retiros, depósitos, transferencias). NO la uses para movimientos que ya aparecen en el contexto o la conversación, ni cuando Allan está cuadrando/reconciliando sus cuentas: ahí corresponde consultar, corregir o eliminar. Declara en newCategories cualquier categoría nueva que uses.',
@@ -196,21 +204,58 @@ export async function runAgent(
         }),
         execute: async (input) => deps.searchMovements(input),
       }),
-    },
-    stopWhen: stepCountIs(5),
-    temperature: 0,
-    timeout: opts.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
-    // Las respuestas son de ~120 palabras: el tope evita salidas desbocadas.
-    maxOutputTokens: 700,
-  });
+  };
 
-  const text =
-    stripThinking(result.text) ||
-    (registered.length > 0 ? '✅ Registrado.' : '🤔 No supe qué hacer con eso, ¿me lo repites?');
+  const run = (messages: typeof baseMessages, timeout: number) =>
+    generateText({
+      model: getAgentModel(),
+      system,
+      messages,
+      tools: agentTools,
+      stopWhen: stepCountIs(5),
+      temperature: 0,
+      timeout,
+      // OJO: en modelos razonadores el PENSAMIENTO cuenta como salida — con 700
+      // el <think> consumía todo y el texto visible quedaba vacío (incidente
+      // 14-jul). 4000 da aire de sobra; a precios de M3 son ~$0.005.
+      maxOutputTokens: 4000,
+    });
+
+  let result = await run(baseMessages, opts.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS);
+  const fallback = () =>
+    registered.length > 0 ? '✅ Registrado.' : '🤔 No supe qué hacer con eso, ¿me lo repites?';
+  let text = stripThinking(result.text) || fallback();
   // totalUsage: suma de TODOS los pasos del loop (usage es solo el último).
   logUsage('runAgent', config.llmModelAgent, result.totalUsage ?? result.usage, {
     steps: result.steps?.length,
   });
+
+  // Dos variantes del mismo mal (modelos razonadores): (a) promesa vacía sin
+  // herramientas ("espera un momento..."), (b) loop terminado SIN texto final
+  // y sin nada registrado. Ambas → un reintento con empujón.
+  const usedTools = (result.steps ?? []).some((s) => (s.toolCalls?.length ?? 0) > 0);
+  const emptyReply = stripThinking(result.text) === '' && registered.length === 0;
+  if ((!usedTools && ANNOUNCE_RE.test(text)) || emptyReply) {
+    logger.warn('agente sin respuesta útil: reintento con empujón', { userText, reply: text, emptyReply });
+    result = await run(
+      [
+        ...baseMessages,
+        { role: 'assistant' as const, content: text },
+        {
+          role: 'user' as const,
+          content:
+            'Entrégame la respuesta completa AHORA, usando las herramientas que hagan falta. No me pidas esperar y no respondas vacío.',
+        },
+      ],
+      60_000,
+    );
+    logUsage('runAgent', config.llmModelAgent, result.totalUsage ?? result.usage, {
+      steps: result.steps?.length,
+      retry: true,
+    });
+    text = stripThinking(result.text) || text;
+  }
+
   logger.info('agente completado', {
     userText,
     steps: result.steps?.length,
