@@ -59,13 +59,48 @@ interface TelegramResponse<T> {
   description?: string;
 }
 
+const MAX_ATTEMPTS = 3;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * fetch con reintentos para fallos TRANSITORIOS: red caída ("fetch failed",
+ * ECONNRESET), timeout del intento, y 5xx/429 de Telegram. Un parpadeo de red
+ * no puede tirar una respuesta del agente ya calculada (incidente 15-jul:
+ * "fetch failed" al enviar un consejo perfecto → el usuario recibió ⚠️).
+ * Los 4xx NO se reintentan: son errores nuestros, no del camino.
+ */
+async function fetchWithRetry(url: string, init: RequestInit, label: string): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      if ((res.status >= 500 || res.status === 429) && attempt < MAX_ATTEMPTS) {
+        logger.warn('telegram reintento por status', { label, attempt, status: res.status });
+        await sleep(300 * attempt);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_ATTEMPTS) {
+        logger.warn('telegram reintento por error de red', { label, attempt, error: String(err) });
+        await sleep(300 * attempt);
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 async function call<T>(method: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${API_BASE}/bot${config.telegramBotToken}/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await fetchWithRetry(
+    `${API_BASE}/bot${config.telegramBotToken}/${method}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    method,
+  );
   const data = (await res.json()) as TelegramResponse<T>;
   if (!res.ok || !data.ok) {
     logger.error('telegram api error', { method, status: res.status, description: data.description });
@@ -110,11 +145,11 @@ export async function sendDocument(
   const bytes = new Uint8Array(typeof content === 'string' ? Buffer.from(content) : content);
   form.append('document', new Blob([bytes]), filename);
 
-  const res = await fetch(`${API_BASE}/bot${config.telegramBotToken}/sendDocument`, {
-    method: 'POST',
-    body: form,
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await fetchWithRetry(
+    `${API_BASE}/bot${config.telegramBotToken}/sendDocument`,
+    { method: 'POST', body: form },
+    'sendDocument',
+  );
   const data = (await res.json()) as TelegramResponse<unknown>;
   if (!res.ok || !data.ok) {
     logger.error('telegram api error', { method: 'sendDocument', status: res.status, description: data.description });
@@ -126,9 +161,11 @@ export async function sendDocument(
 export async function getFileBuffer(fileId: string): Promise<Buffer> {
   const file = await call<{ file_path?: string }>('getFile', { file_id: fileId });
   if (!file.file_path) throw new Error('getFile no devolvió file_path');
-  const res = await fetch(`${API_BASE}/file/bot${config.telegramBotToken}/${file.file_path}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await fetchWithRetry(
+    `${API_BASE}/file/bot${config.telegramBotToken}/${file.file_path}`,
+    {},
+    'getFileBuffer',
+  );
   if (!res.ok) throw new Error(`Descarga de archivo falló: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
