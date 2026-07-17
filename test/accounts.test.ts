@@ -100,3 +100,17 @@ describe('computeBalances', () => {
     expect(tarjeta!.balance).toBe(-3192.86);
   });
 });
+
+describe('renderSaldos', () => {
+  it('explica el modelo sin jerga: movimientos incluidos, no fecha críptica', async () => {
+    const { renderSaldos } = await import('../src/lib/accounts');
+    const text = renderSaldos([
+      { id: 'banco', name: 'Banco Industrial (BI)', emoji: '🏦', seedBalance: 915, asOf: '2026-07-12', estimated: false, updatedAt: '', balance: 3190.59, movements: 3 },
+      { id: 'efectivo', name: 'Efectivo', emoji: '💵', seedBalance: 0, asOf: '2026-07-15', estimated: false, updatedAt: '', balance: 0, movements: 0 },
+    ]);
+    expect(text).toContain('incluye tus últimos 3 movimientos');
+    expect(text).toContain('sin movimientos desde el 2026-07-15');
+    expect(text).not.toContain('+ 3 movs'); // la notación críptica no vuelve
+    expect(text).toContain('base confirmada');
+  });
+});

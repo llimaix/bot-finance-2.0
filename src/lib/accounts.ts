@@ -88,9 +88,19 @@ export function renderSaldos(balances: ReadonlyArray<AccountBalance>): string {
   for (const b of balances) {
     neto = Math.round((neto + b.balance) * 100) / 100;
     const flag = b.estimated ? ' ⚠️ estimado' : '';
-    lines.push(`${b.emoji} ${b.name}: ${formatQ(b.balance)}${flag}  <i>(al ${b.asOf} + ${b.movements} movs)</i>`);
+    // "(al <fecha> + N movs)" confundía: parecía decir "sin movimientos desde
+    // <fecha>" cuando significa lo contrario (base anclada + N ya aplicados).
+    const detalle =
+      b.movements > 0
+        ? `incluye tus ${b.movements === 1 ? 'último movimiento' : `últimos ${b.movements} movimientos`}`
+        : `sin movimientos desde el ${b.asOf}`;
+    lines.push(`${b.emoji} ${b.name}: ${formatQ(b.balance)}${flag}  <i>(${detalle})</i>`);
   }
   lines.push('', `🧮 Neto líquido: ${formatQ(neto)}`);
-  lines.push('', 'Ajusta una semilla con: /saldo efectivo 350');
+  lines.push(
+    '',
+    'ℹ️ Cada saldo = base confirmada en su última cuadratura + tus movimientos posteriores, ya sumados.',
+    'Ajusta una base con: /saldo efectivo 350',
+  );
   return lines.join('\n');
 }
