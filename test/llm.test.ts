@@ -114,3 +114,20 @@ describe('ANNOUNCE_RE (anuncio sin acción)', () => {
     expect(ANNOUNCE_RE.test('Listo, registré tus Q45 de almuerzo.')).toBe(false);
   });
 });
+
+describe('CLAIM_RE (afirmación sin escritura)', () => {
+  it('detecta afirmaciones de acciones', async () => {
+    const { CLAIM_RE } = await import('../src/lib/ai/agent');
+    expect(CLAIM_RE.test('✅ Registrado tu pago de quincena')).toBe(true);
+    expect(CLAIM_RE.test('Listo, quedó anotado el gasto')).toBe(true);
+    expect(CLAIM_RE.test('La paso a memoria para no olvidarlo')).toBe(true);
+    expect(CLAIM_RE.test('Ajustado, Banrural queda en Q25')).toBe(true);
+  });
+
+  it('no confunde consultas ni consejos', async () => {
+    const { CLAIM_RE } = await import('../src/lib/ai/agent');
+    expect(CLAIM_RE.test('Tenés Q3,190.59 en BI y la tarjeta en cero.')).toBe(false);
+    expect(CLAIM_RE.test('Te recomiendo pagar mañana: maximizas tu colchón.')).toBe(false);
+    expect(CLAIM_RE.test('En mayo gastaste Q716 en farmacias.')).toBe(false);
+  });
+});

@@ -23,6 +23,30 @@ const DEFAULT_AGENT_TIMEOUT_MS = 20_000;
 export const ANNOUNCE_RE =
   /esper[aáe]|un momento|un segundo|estoy (consultando|revisando|buscando|verificando)|voy a (consultar|revisar|buscar|verificar)|d[eé]jame (ver|revisar|consultar)/i;
 
+/**
+ * "Afirmación sin escritura": la variante retrospectiva del mismo mal — el
+ * modelo dice "✅ Registrado" SIN haber llamado ninguna herramienta (incidente
+ * 15/17-jul: la quincena de Q7,500 y el pago total de la tarjeta jamás se
+ * guardaron pese a confirmaciones triunfales). Si el texto afirma una acción
+ * y no hubo herramienta de ESCRITURA, se reintenta; si persiste, el sistema
+ * estampa la verdad — el usuario nunca debe creer guardado lo que no lo está.
+ */
+export const CLAIM_RE =
+  /✅|\bregistrad[oa]s?\b|\banotad[oa]s?\b|\bguardad[oa]s?\b|\bajustad[oa]s?\b|\beliminad[oa]s?\b|\bborrad[oa]s?\b|paso a memoria|lo apunto|queda marcad/i;
+
+const WRITE_TOOLS = new Set([
+  'registrar_movimientos',
+  'corregir_movimiento',
+  'eliminar_movimiento',
+  'ajustar_cuenta',
+  'fijar_meta',
+  'recordar_dato',
+  'dia_sin_movimientos',
+]);
+
+const NO_WRITE_DISCLAIMER =
+  '\n\n⚠️ Nota del sistema: en este turno NO guardé ni cambié ningún dato. Si esperabas un registro, vuelve a pedírmelo.';
+
 export interface RegisteredBatch {
   txns: Transaction[];
   createdCategories: Array<{ name: string; emoji: string }>;
@@ -230,23 +254,17 @@ export async function runAgent(
     steps: result.steps?.length,
   });
 
-  // Dos variantes del mismo mal (modelos razonadores): (a) promesa vacía sin
+  // Tres variantes del mismo mal (modelos razonadores): (a) promesa vacía sin
   // herramientas ("espera un momento..."), (b) loop terminado SIN texto final
-  // y sin nada registrado. Ambas → un reintento con empujón.
-  const usedTools = (result.steps ?? []).some((s) => (s.toolCalls?.length ?? 0) > 0);
-  const emptyReply = stripThinking(result.text) === '' && registered.length === 0;
-  if ((!usedTools && ANNOUNCE_RE.test(text)) || emptyReply) {
-    logger.warn('agente sin respuesta útil: reintento con empujón', { userText, reply: text, emptyReply });
+  // y sin nada registrado, (c) AFIRMAR una acción ("✅ Registrado") sin haber
+  // llamado ninguna herramienta de escritura. Máximo UN reintento por turno
+  // (presupuesto de tiempo del processor); si la afirmación falsa persiste,
+  // el sistema estampa la verdad en el mensaje.
+  const wroteIn = (r: typeof result) =>
+    (r.steps ?? []).some((s) => (s.toolCalls ?? []).some((tc) => WRITE_TOOLS.has(tc.toolName)));
+  const retryWith = async (nudge: string) => {
     result = await run(
-      [
-        ...baseMessages,
-        { role: 'assistant' as const, content: text },
-        {
-          role: 'user' as const,
-          content:
-            'Responde AHORA directamente lo que te pregunté, usando las herramientas que hagan falta. Si es una decisión, empieza con tu recomendación y sus razones. No me pidas esperar, no respondas vacío y no me des un volcado de datos.',
-        },
-      ],
+      [...baseMessages, { role: 'assistant' as const, content: text }, { role: 'user' as const, content: nudge }],
       60_000,
     );
     logUsage('runAgent', config.llmModelAgent, result.totalUsage ?? result.usage, {
@@ -254,6 +272,29 @@ export async function runAgent(
       retry: true,
     });
     text = stripThinking(result.text) || text;
+  };
+
+  let retried = false;
+  const usedTools = (result.steps ?? []).some((s) => (s.toolCalls?.length ?? 0) > 0);
+  const emptyReply = stripThinking(result.text) === '' && registered.length === 0;
+  if ((!usedTools && ANNOUNCE_RE.test(text)) || emptyReply) {
+    logger.warn('agente sin respuesta útil: reintento con empujón', { userText, reply: text, emptyReply });
+    retried = true;
+    await retryWith(
+      'Responde AHORA directamente lo que te pregunté, usando las herramientas que hagan falta. Si es una decisión, empieza con tu recomendación y sus razones. No me pidas esperar, no respondas vacío y no me des un volcado de datos.',
+    );
+  }
+
+  if (!wroteIn(result) && CLAIM_RE.test(text)) {
+    logger.warn('agente afirmó una acción sin herramienta de escritura', { userText, reply: text, retried });
+    if (!retried) {
+      await retryWith(
+        'Afirmaste que registraste/guardaste algo, pero NO llamaste ninguna herramienta en este turno: NADA quedó guardado. Si hay algo que registrar o cambiar, llama las herramientas AHORA; si no hay nada que guardar, responde sin afirmar acciones que no hiciste.',
+      );
+    }
+    if (!wroteIn(result) && CLAIM_RE.test(text)) {
+      text += NO_WRITE_DISCLAIMER;
+    }
   }
 
   logger.info('agente completado', {

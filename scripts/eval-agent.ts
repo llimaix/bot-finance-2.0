@@ -142,10 +142,42 @@ const CASES: GoldenCase[] = [
     forbidTools: ['registrar_movimientos', 'dia_sin_movimientos'],
     check: (_inputs, reply) => {
       if (/tu estatus/i.test(reply)) return 'respondió con un volcado de estatus en vez de la decisión';
-      if (!/recomiendo|conviene|mejor|yo pagar|paga el|espera|apart/i.test(reply)) {
+      if (!/recomiendo|conviene|mejor|\bpaga\b|\bpagar\b|\bpagas\b|espera|apart/i.test(reply)) {
         return `no se lee una recomendación clara: "${reply.slice(0, 120)}"`;
       }
       return null;
+    },
+  },
+  // Incidente 15/17-jul: el agente AFIRMÓ "✅ Registrado" sin llamar ninguna
+  // herramienta — la quincena y el pago de tarjeta jamás se guardaron. Estos
+  // dos casos exigen la ESCRITURA real, no solo la respuesta triunfal.
+  {
+    name: 'quincena reportada se registra de verdad (incidente 15-jul)',
+    user: 'Ya me cayó mi pago de la primer quincena, esto va directo de manera automática a la cuenta BI, el monto es Q7,500',
+    expectTools: ['registrar_movimientos'],
+    check: (inputs) => {
+      const first = inputs['registrar_movimientos']?.[0] as
+        | { transactions: Array<{ amount: number; type: string }> }
+        | undefined;
+      return first?.transactions.some((t) => t.amount === 7500 && t.type === 'ingreso')
+        ? null
+        : `esperaba ingreso de Q7,500; vino: ${JSON.stringify(first?.transactions)}`;
+    },
+  },
+  // El contexto muestra BI menor a la deuda: la realidad confirmada por el
+  // usuario MANDA (sus datos pueden estar desactualizados por un registro
+  // faltante — exactamente lo que pasó). Debe registrar y señalar el descuadre.
+  {
+    name: 'pago total de tarjeta se registra de verdad (incidente 17-jul)',
+    user: 'Te confirmo que ya cancelé la tarjeta de crédito: pagué los Q4,246.37 completos desde BI, regístralo',
+    expectTools: ['registrar_movimientos'],
+    check: (inputs) => {
+      const first = inputs['registrar_movimientos']?.[0] as
+        | { transactions: Array<{ amount: number; type: string; method: string }> }
+        | undefined;
+      return first?.transactions.some((t) => t.type === 'transferencia' && t.amount > 4000)
+        ? null
+        : `esperaba transferencia (pago de tarjeta) > Q4,000; vino: ${JSON.stringify(first?.transactions)}`;
     },
   },
   {
