@@ -289,7 +289,23 @@ export async function runAgent(
       maxOutputTokens: 4000,
     });
 
-  let result = await run(baseMessages, opts.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS);
+  let result: Awaited<ReturnType<typeof run>>;
+  try {
+    result = await run(baseMessages, opts.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS);
+  } catch (err) {
+    // Timeout u otro fallo TRAS haber persistido movimientos: los txns ya
+    // están en Dynamo (los escribió el tool). No descartarlos ni reportar
+    // fallo total — eso hacía que el usuario reescribiera y se duplicara.
+    if (registered.length > 0) {
+      logger.warn('runAgent falló tras registrar; confirmo lo persistido', {
+        userText,
+        error: err instanceof Error ? err.message : String(err),
+        registered: registered.length,
+      });
+      return { text: '✅ Registrado.', registered, usedAnyTool: true, usedWriteTool: true };
+    }
+    throw err;
+  }
   const fallback = () =>
     registered.length > 0 ? '✅ Registrado.' : '🤔 No supe qué hacer con eso, ¿me lo repites?';
   let text = stripThinking(result.text) || fallback();
@@ -327,9 +343,19 @@ export async function runAgent(
   const emptyReply = stripThinking(result.text) === '' && registered.length === 0;
   if ((!anyTool(result) && ANNOUNCE_RE.test(text)) || emptyReply) {
     logger.warn('agente sin respuesta útil: reintento con empujón', { userText, reply: text, emptyReply });
-    await retryWith(
-      'Responde AHORA directamente lo que te pregunté, usando las herramientas que hagan falta. Si es una decisión, empieza con tu recomendación y sus razones. No me pidas esperar, no respondas vacío y no me des un volcado de datos.',
-    );
+    try {
+      await retryWith(
+        'Responde AHORA directamente lo que te pregunté, usando las herramientas que hagan falta. Si es una decisión, empieza con tu recomendación y sus razones. No me pidas esperar, no respondas vacío y no me des un volcado de datos.',
+      );
+    } catch (err) {
+      // Si el reintento falla pero el primer intento YA registró, no perderlo:
+      // text ya es el fallback "✅ Registrado.". Sin registro previo, propaga.
+      if (registered.length === 0) throw err;
+      logger.warn('reintento falló tras registrar; confirmo lo previo', {
+        userText,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   logger.info('agente completado', {

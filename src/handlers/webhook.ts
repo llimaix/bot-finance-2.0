@@ -1,7 +1,6 @@
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { config } from '../lib/config';
-import { tryClaimUpdate } from '../lib/dynamo';
 import { logger } from '../lib/logger';
 import type { TelegramUpdate } from '../lib/telegram';
 
@@ -10,9 +9,11 @@ const lambda = new LambdaClient({});
 const OK: APIGatewayProxyStructuredResultV2 = { statusCode: 200, body: 'ok' };
 
 /**
- * Webhook THIN: valida, deduplica, filtra y delega el trabajo real al
- * processor por invocación asíncrona. Responde 200 en milisegundos — los
- * timeouts del HTTP API (30s) dejan de ser una restricción para el agente.
+ * Webhook THIN: valida, filtra y delega el trabajo real al processor por
+ * invocación asíncrona. Responde 200 en milisegundos. La DEDUPLICACIÓN vive
+ * en el processor (no aquí): así un mismo update_id se procesa una sola vez
+ * aunque Telegram reintente el webhook, aunque Lambda reintente el processor,
+ * o aunque esta invocación falle en la respuesta pero haya llegado.
  */
 export const handler = async (
   event: APIGatewayProxyEventV2,
@@ -29,20 +30,17 @@ export const handler = async (
   const callback = update.callback_query;
   if (!message && !callback) return OK;
 
-  // 2. Idempotencia: Telegram reintenta updates; procesar cada update_id una sola vez
-  if (!(await tryClaimUpdate(update.update_id))) {
-    logger.info('update duplicado ignorado', { updateId: update.update_id });
-    return OK;
-  }
-
-  // 3. Bot personal: cualquier otro chat/usuario se ignora en silencio
+  // 2. Bot personal: cualquier otro chat/usuario se ignora en silencio
   const senderId = message?.chat.id ?? callback?.from.id;
   if (String(senderId) !== config.allowedChatId) {
     logger.warn('chat no permitido', { senderId });
     return OK;
   }
 
-  // 4. Delegar al processor (asíncrono) y responder 200 de inmediato
+  // 3. Delegar al processor (asíncrono). Si la invocación falla, respondemos
+  //    NO-200 para que Telegram reintente el webhook — antes se perdía el
+  //    mensaje en silencio con un 200. El dedup del processor evita el doble
+  //    proceso si la invocación en realidad sí había llegado.
   try {
     await lambda.send(
       new InvokeCommand({
@@ -52,11 +50,11 @@ export const handler = async (
       }),
     );
   } catch (err) {
-    // Error aquí = update perdido: log ruidoso para que dispare la alarma.
-    logger.error('no se pudo invocar el processor', {
+    logger.error('no se pudo invocar el processor; pido reintento a Telegram', {
       updateId: update.update_id,
       error: err instanceof Error ? err.message : String(err),
     });
+    return { statusCode: 500, body: 'retry' };
   }
 
   return OK;

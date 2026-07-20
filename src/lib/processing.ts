@@ -43,6 +43,7 @@ import {
   queryMonth,
   queryRange,
   setLastRecurringAskAt,
+  tryClaimUpdate,
   updateTransactionFields,
 } from './dynamo';
 import {
@@ -76,6 +77,26 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
   const callback = update.callback_query;
   const senderId = message?.chat.id ?? callback?.from.id;
   if (!senderId) return;
+
+  // Deduplicación AQUÍ (no en el webhook): un update_id se procesa una sola
+  // vez pase lo que pase — reintento de Telegram, reintento async de Lambda,
+  // o doble invocación. Si el claim falla por un error de infra, procesamos
+  // igual (mejor un raro duplicado que perder el mensaje del usuario).
+  if (typeof update.update_id === 'number') {
+    let firstTime = true;
+    try {
+      firstTime = await tryClaimUpdate(update.update_id);
+    } catch (err) {
+      logger.error('dedup falló; proceso el update igual', {
+        updateId: update.update_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (!firstTime) {
+      logger.info('update duplicado ignorado', { updateId: update.update_id });
+      return;
+    }
+  }
 
   try {
     if (callback) await handleCallback(callback);
