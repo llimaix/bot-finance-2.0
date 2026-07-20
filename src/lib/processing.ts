@@ -1,5 +1,5 @@
 import { ulid } from 'ulid';
-import { CLAIM_RE, NO_WRITE_DISCLAIMER, REGISTER_INTENT_RE, runAgent } from './ai/agent';
+import { NO_WRITE_DISCLAIMER, needsDeterministicRegister, needsNoWriteDisclaimer, runAgent } from './ai/agent';
 import type { AgentDeps } from './ai/agent';
 import { answerQuestion, correctTransaction, materializeParsed, parseReceipt, parseTransactions } from './ai/parse';
 import type { ParseOutcome } from './ai/parse';
@@ -256,7 +256,12 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     register: async (input) => {
       const outcome = await materializeParsed(input);
       const txns = await persistOutcome(outcome, userText, today);
-      const [todayTxns, advertencias] = await Promise.all([queryDay(today), warningsFor(txns)]);
+      // Los txns YA están escritos: un fallo de LECTURA aquí no debe hacer
+      // rechazar (haría creer al agente que no guardó → la red re-registraría).
+      const [todayTxns, advertencias] = await Promise.all([
+        queryDay(today).catch(() => txns),
+        warningsFor(txns).catch(() => [] as string[]),
+      ]);
       collectedWarnings.push(...advertencias);
       return {
         txns,
@@ -379,12 +384,10 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
   // ── Red de seguridad DETERMINISTA ────────────────────────────────────────
   // M3 llama la herramienta de registro de forma intermitente (~2 de 3): a
   // veces afirma "Hecho: Q135" sin registrar nada. Si el mensaje pedía un
-  // registro y el agente NO registró, lo hacemos con el parser forzado (que
-  // con M3 es 100% confiable) — nunca más un "Hecho" sin dato guardado.
-  if (
-    result.registered.length === 0 &&
-    (REGISTER_INTENT_RE.test(userText) || CLAIM_RE.test(result.text))
-  ) {
+  // registro y el agente NO ESCRIBIÓ NADA (ni corrigió/ajustó/marcó), lo
+  // registramos con el parser forzado (100% confiable con M3). El control por
+  // usedWriteTool evita doble-registrar cuando el agente corrigió/ajustó.
+  if (needsDeterministicRegister(result.usedWriteTool, userText)) {
     const outcome = await parseTransactions(userText).catch((err) => {
       logger.error('red de seguridad: parseo falló', { error: String(err) });
       return null;
@@ -404,11 +407,11 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       await rememberExchange(transcript ?? userText, sent);
       return; // saveAndConfirm ya envió y disparó la detección de recurrentes
     }
-    // Afirmó una acción, no la ejecutó y no hay nada que registrar (ni siquiera
-    // usó una herramienta): estampar la verdad para no dejar creer un guardado.
-    if (!result.usedAnyTool && CLAIM_RE.test(result.text)) {
-      result.text += NO_WRITE_DISCLAIMER;
-    }
+  }
+  // Afirmó una ESCRITURA que no ejecutó (y no se recuperó arriba): estampar la
+  // verdad para no dejar creer un guardado que no ocurrió.
+  if (needsNoWriteDisclaimer(result.usedWriteTool, result.text)) {
+    result.text += NO_WRITE_DISCLAIMER;
   }
 
   const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';

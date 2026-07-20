@@ -160,3 +160,44 @@ describe('REGISTER_INTENT_RE (activa la red de seguridad)', () => {
     expect(REGISTER_INTENT_RE.test('Dame mi estatus')).toBe(false);
   });
 });
+
+describe('needsDeterministicRegister (guard contra doble registro)', () => {
+  it('registra solo si NO hubo escritura y el usuario pidió registrar', async () => {
+    const { needsDeterministicRegister } = await import('../src/lib/ai/agent');
+    // agente no escribió + intención de registro → sí
+    expect(needsDeterministicRegister(false, 'gasté Q135 en hotel')).toBe(true);
+    // agente YA escribió (corrigió/ajustó/marcó) → NO re-registrar (bug #1)
+    expect(needsDeterministicRegister(true, 'en realidad gasté Q60, corrígelo')).toBe(false);
+    expect(needsDeterministicRegister(true, 'marca Tigo como pagado, ya me lo cobraron')).toBe(false);
+    // sin intención de registro (consulta) → no
+    expect(needsDeterministicRegister(false, 'dame los últimos 10 movimientos')).toBe(false);
+    expect(needsDeterministicRegister(false, '¿me alcanza para la play 5?')).toBe(false);
+  });
+});
+
+describe('needsNoWriteDisclaimer (honestidad sin falsos positivos)', () => {
+  it('estampa solo afirmaciones de ESCRITURA sin escritura real', async () => {
+    const { needsNoWriteDisclaimer } = await import('../src/lib/ai/agent');
+    expect(needsNoWriteDisclaimer(false, '✅ Registrado tu gasto de Q45')).toBe(true);
+    expect(needsNoWriteDisclaimer(false, 'Listo, ajustado a Q40')).toBe(true);
+    // el agente SÍ escribió → sin disclaimer
+    expect(needsNoWriteDisclaimer(true, '✅ Registrado tu gasto de Q45')).toBe(false);
+    // veredicto de compra "✅ Sí te alcanza" NO es una escritura → sin disclaimer (bug #4)
+    expect(needsNoWriteDisclaimer(false, '✅ Sí te alcanza, adelante con la compra.')).toBe(false);
+    // "De hecho tenés..." (respuesta de consulta) NO debe disparar disclaimer
+    expect(needsNoWriteDisclaimer(false, 'De hecho tenés Q3,190 en BI.')).toBe(false);
+    // pero "Hecho: Q150 de cena" (confirmación falsa) sí
+    expect(needsNoWriteDisclaimer(false, 'Hecho: Q150 de cena, efectivo.')).toBe(true);
+  });
+});
+
+describe('stripThinking con anidamiento (fuga de razonamiento)', () => {
+  it('no filtra el texto intermedio de bloques <think> anidados', async () => {
+    const { stripThinking } = await import('../src/lib/ai/llm');
+    expect(stripThinking('<think>externo <think>interno</think> sigo pensando</think>Respuesta')).toBe('Respuesta');
+  });
+  it('sigue manejando bloques separados correctamente', async () => {
+    const { stripThinking } = await import('../src/lib/ai/llm');
+    expect(stripThinking('<think>a</think>Listo.<think>b</think> ¿Algo más?')).toBe('Listo. ¿Algo más?');
+  });
+});

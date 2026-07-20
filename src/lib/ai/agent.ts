@@ -55,6 +55,29 @@ export const NO_WRITE_DISCLAIMER =
 export const REGISTER_INTENT_RE =
   /\b(gast|pagu[eé]|pag(?:o|u[eé]|amos|ad)|compr|retir|dep[oó]sit|deposit|ingres|me cay[oó]|cobr|registr|anot)\w*/i;
 
+/** Afirmación de ESCRITURA (registrar/ajustar/marcar…), SIN el ✅ suelto: los
+ *  veredictos de compra empiezan con "✅ Sí te alcanza" y NO son una escritura. */
+export const WRITE_CLAIM_RE =
+  /\bregistr(?:ad[oa]s?|[eé])|\banot(?:ad[oa]s?|[eé])|\bguard(?:ad[oa]s?|[eé])|\bagreg(?:ad[oa]s?|u[eé])|\ba[ñn]adid[oa]s?|\bapunt(?:ad[oa]s?|[eé])|\bajust(?:ad[oa]s?|[eé])|\belimin(?:ad[oa]s?|[eé])|\bborr(?:ad[oa]s?|[eé])|\bmarc(?:ad[oa]s?)|\bmarqu[eé]|(?<!de )\bhecho\b|paso a memoria|lo apunto|qued[oó] (?:guardad|registrad|anotad|apuntad|marcad)|sale de tu (?:efectivo|cuenta|saldo)/i;
+
+/**
+ * ¿Debe la red de seguridad determinista intentar registrar? SOLO si el agente
+ * NO escribió NADA (ni corregir/ajustar/marcar — mirar la ESCRITURA, no solo
+ * registrar_movimientos) y el mensaje del usuario pedía registrar. Sin el
+ * primer control, un "corrígelo a Q60" (corregir_movimiento) re-registraba un
+ * gasto nuevo duplicado.
+ */
+export function needsDeterministicRegister(usedWriteTool: boolean, userText: string): boolean {
+  return !usedWriteTool && REGISTER_INTENT_RE.test(userText);
+}
+
+/** ¿Estampar "no guardé nada"? Si el agente afirmó una ESCRITURA y no la hizo.
+ *  Se mira usedWriteTool (no usedAnyTool): una consulta previa no borra la
+ *  mentira de "✅ Registrado". */
+export function needsNoWriteDisclaimer(usedWriteTool: boolean, replyText: string): boolean {
+  return !usedWriteTool && WRITE_CLAIM_RE.test(replyText);
+}
+
 export interface RegisteredBatch {
   txns: Transaction[];
   createdCategories: Array<{ name: string; emoji: string }>;

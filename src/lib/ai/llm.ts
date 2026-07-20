@@ -68,11 +68,22 @@ export function getVisionModel(): LanguageModel {
  * sin cerrar (salida truncada), se corta desde ahí.
  */
 export function stripThinking(text: string): string {
-  // Cubre variantes con namespace: <think>, <mm:think>, etc.
-  let out = text.replace(/<([\w:]*think)>[\s\S]*?<\/\1>/gi, '');
+  // Quita bloques <think> (y variantes con namespace: <mm:think>) de ADENTRO
+  // hacia afuera: el bloque más interno (sin otro <think> dentro) primero, en
+  // bucle. Así maneja anidamiento sin filtrar el texto intermedio y también
+  // bloques separados. (Un regex simple no-greedy sobre anidados dejaba
+  // escapar la parte intermedia del razonamiento.)
+  const innermost = /<([\w:]*think)>(?:(?!<[\w:]*think>)[\s\S])*?<\/\1>/i;
+  let out = text;
+  let prev: string;
+  do {
+    prev = out;
+    out = out.replace(innermost, '');
+  } while (out !== prev);
+  // Apertura sin cierre (salida truncada): corta desde ahí.
   const unclosed = out.search(/<[\w:]*think>/i);
   if (unclosed >= 0) out = out.slice(0, unclosed);
-  // Tags de cierre huérfanos (el de apertura quedó en otro paso del loop).
+  // Cierres huérfanos (la apertura quedó en otro paso del loop).
   out = out.replace(/<\/[\w:]*think>/gi, '');
   return out.trim();
 }

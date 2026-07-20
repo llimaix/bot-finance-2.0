@@ -25,9 +25,12 @@ export function accountDelta(txn: Transaction, account: AccountId): number {
   const a = txn.amount;
   switch (account) {
     case 'banco':
-      if (txn.type === 'ingreso') return a;
+      // Ingresos NO en efectivo entran al banco; un ingreso en efectivo ya lo
+      // suma la cuenta efectivo (contarlo aquí también lo duplicaba en el neto).
+      if (txn.type === 'ingreso' && txn.method !== 'efectivo') return a;
       if (txn.method === 'debito') return -a;
-      if (txn.type === 'transferencia' && txn.method === 'transferencia') return -a;
+      // Sale del banco: transferencia a Kash o pago de tarjeta (categoría deuda).
+      if (txn.type === 'transferencia' && (txn.method === 'transferencia' || txn.category === 'deuda')) return -a;
       if (txn.type === 'deposito' && txn.method !== 'efectivo') return -a;
       return 0;
 
@@ -38,7 +41,9 @@ export function accountDelta(txn: Transaction, account: AccountId): number {
 
     case 'tarjeta':
       if (txn.method === 'credito') return -a;
-      if (txn.type === 'transferencia' && txn.method === 'debito' && txn.category === 'deuda') return a;
+      // Pago de tarjeta (baja la deuda): transferencia categoría deuda, sea el
+      // método débito o transferencia — antes solo débito y el resto iba a Kash.
+      if (txn.type === 'transferencia' && txn.category === 'deuda') return a;
       return 0;
 
     case 'efectivo':
@@ -47,7 +52,8 @@ export function accountDelta(txn: Transaction, account: AccountId): number {
       return 0;
 
     case 'kash':
-      if (txn.type === 'transferencia' && txn.method === 'transferencia') return a;
+      // Transferencia a Kash, EXCEPTO si es un pago de tarjeta (categoría deuda).
+      if (txn.type === 'transferencia' && txn.method === 'transferencia' && txn.category !== 'deuda') return a;
       if (txn.type === 'gasto' && txn.method === 'transferencia') return -a;
       return 0;
   }

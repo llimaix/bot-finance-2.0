@@ -75,6 +75,19 @@ describe('accountDelta', () => {
     expect(accountDelta(pago, 'banco')).toBe(-2000);
     expect(accountDelta(pago, 'tarjeta')).toBe(2000);
   });
+
+  it('ingreso en EFECTIVO entra solo al efectivo, no también al banco (no se cuenta doble)', () => {
+    const cashIn = txn({ type: 'ingreso', method: 'efectivo', amount: 500, category: 'otros' });
+    expect(accountDelta(cashIn, 'efectivo')).toBe(500);
+    expect(accountDelta(cashIn, 'banco')).toBe(0);
+  });
+
+  it('pago de tarjeta por TRANSFERENCIA (no débito) también baja la deuda, no va a Kash', () => {
+    const pago = txn({ type: 'transferencia', method: 'transferencia', category: 'deuda', amount: 1500 });
+    expect(accountDelta(pago, 'banco')).toBe(-1500);
+    expect(accountDelta(pago, 'tarjeta')).toBe(1500);
+    expect(accountDelta(pago, 'kash')).toBe(0);
+  });
 });
 
 describe('computeBalances', () => {
