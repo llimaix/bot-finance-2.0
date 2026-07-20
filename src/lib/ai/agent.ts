@@ -47,8 +47,13 @@ const WRITE_TOOLS = new Set([
   'marcar_recurrente_pagado',
 ]);
 
-const NO_WRITE_DISCLAIMER =
-  '\n\n⚠️ Nota del sistema: en este turno NO guardé ni cambié ningún dato. Si esperabas un registro, vuelve a pedírmelo.';
+export const NO_WRITE_DISCLAIMER =
+  '\n\n⚠️ Nota del sistema: en este turno no guardé ni cambié ningún dato. Si esperabas un registro, vuelve a pedírmelo.';
+
+/** El mensaje del usuario pide REGISTRAR un movimiento (gasto/ingreso/retiro…):
+ *  señal para activar la red de seguridad si el agente afirma sin ejecutar. */
+export const REGISTER_INTENT_RE =
+  /\b(gast|pagu[eé]|pag(?:o|u[eé]|amos|ad)|compr|retir|dep[oó]sit|deposit|ingres|me cay[oó]|cobr|registr|anot)\w*/i;
 
 export interface RegisteredBatch {
   txns: Transaction[];
@@ -99,6 +104,11 @@ export interface AgentDeps {
 export interface AgentResult {
   text: string;
   registered: Transaction[];
+  /** true si el agente llamó ALGUNA herramienta (para decidir si una
+   *  afirmación de acción fue real o alucinada). */
+  usedAnyTool: boolean;
+  /** true si llamó alguna herramienta de ESCRITURA (registrar/corregir/…). */
+  usedWriteTool: boolean;
 }
 
 /**
@@ -285,27 +295,18 @@ export async function runAgent(
     text = stripThinking(result.text) || text;
   };
 
-  let retried = false;
-  const usedTools = (result.steps ?? []).some((s) => (s.toolCalls?.length ?? 0) > 0);
+  const anyTool = (r: typeof result) => (r.steps ?? []).some((s) => (s.toolCalls?.length ?? 0) > 0);
+
+  // Promesa vacía ("espera un momento...") o loop terminado sin texto útil:
+  // un reintento con empujón. (Las AFIRMACIONES falsas de registro las cubre
+  // la red de seguridad DETERMINISTA en processing.ts, no un reintento a M3 —
+  // reintentar producía disculpas confusas en consultas de lectura.)
   const emptyReply = stripThinking(result.text) === '' && registered.length === 0;
-  if ((!usedTools && ANNOUNCE_RE.test(text)) || emptyReply) {
+  if ((!anyTool(result) && ANNOUNCE_RE.test(text)) || emptyReply) {
     logger.warn('agente sin respuesta útil: reintento con empujón', { userText, reply: text, emptyReply });
-    retried = true;
     await retryWith(
       'Responde AHORA directamente lo que te pregunté, usando las herramientas que hagan falta. Si es una decisión, empieza con tu recomendación y sus razones. No me pidas esperar, no respondas vacío y no me des un volcado de datos.',
     );
-  }
-
-  if (!wroteIn(result) && CLAIM_RE.test(text)) {
-    logger.warn('agente afirmó una acción sin herramienta de escritura', { userText, reply: text, retried });
-    if (!retried) {
-      await retryWith(
-        'Afirmaste que registraste/guardaste algo, pero NO llamaste ninguna herramienta en este turno: NADA quedó guardado. Si hay algo que registrar o cambiar, llama las herramientas AHORA; si no hay nada que guardar, responde sin afirmar acciones que no hiciste.',
-      );
-    }
-    if (!wroteIn(result) && CLAIM_RE.test(text)) {
-      text += NO_WRITE_DISCLAIMER;
-    }
   }
 
   logger.info('agente completado', {
@@ -314,5 +315,5 @@ export async function runAgent(
     registered: registered.length,
     reply: text,
   });
-  return { text, registered };
+  return { text, registered, usedAnyTool: anyTool(result), usedWriteTool: wroteIn(result) };
 }

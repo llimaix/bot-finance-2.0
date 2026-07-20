@@ -141,3 +141,22 @@ describe('CLAIM_RE ampliado (incidente cena "Hecho")', () => {
     expect(CLAIM_RE.test('Lo marqué como pagado este mes.')).toBe(true);
   });
 });
+
+describe('REGISTER_INTENT_RE (activa la red de seguridad)', () => {
+  it('detecta mensajes que piden registrar un movimiento', async () => {
+    const { REGISTER_INTENT_RE } = await import('../src/lib/ai/agent');
+    expect(REGISTER_INTENT_RE.test('Necesito registrar otro gasto de efectivo pago de hotel anoche 135 quetzales')).toBe(true);
+    expect(REGISTER_INTENT_RE.test('Otro gasto de efectivo 100 quetzales en cena con familia de mi novia')).toBe(true);
+    expect(REGISTER_INTENT_RE.test('compré botas Q450')).toBe(true);
+    expect(REGISTER_INTENT_RE.test('me cayó la quincena Q7500')).toBe(true);
+    expect(REGISTER_INTENT_RE.test('retiré 1000 del cajero')).toBe(true);
+  });
+
+  it('no dispara en consultas ni saludos', async () => {
+    const { REGISTER_INTENT_RE } = await import('../src/lib/ai/agent');
+    expect(REGISTER_INTENT_RE.test('Dame los últimos 10 movimientos de efectivo')).toBe(false);
+    expect(REGISTER_INTENT_RE.test('¿Cuánto tengo en el banco?')).toBe(false);
+    expect(REGISTER_INTENT_RE.test('Hola, ¿cómo estás?')).toBe(false);
+    expect(REGISTER_INTENT_RE.test('Dame mi estatus')).toBe(false);
+  });
+});

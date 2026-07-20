@@ -1,7 +1,7 @@
 import { ulid } from 'ulid';
-import { runAgent } from './ai/agent';
+import { CLAIM_RE, NO_WRITE_DISCLAIMER, REGISTER_INTENT_RE, runAgent } from './ai/agent';
 import type { AgentDeps } from './ai/agent';
-import { answerQuestion, correctTransaction, materializeParsed, parseReceipt } from './ai/parse';
+import { answerQuestion, correctTransaction, materializeParsed, parseReceipt, parseTransactions } from './ai/parse';
 import type { ParseOutcome } from './ai/parse';
 import { DEFAULT_ACCOUNTS, renderSaldos } from './accounts';
 import { renderMetas, suggestBudgets } from './budgets';
@@ -375,6 +375,41 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
   // Con la arquitectura asíncrona el presupuesto es holgado (processor: 180s).
   // MiniMax-M3 razona largo: los picos de latencia superan los 45s.
   const result = await withTyping(chatId, () => runAgent(userText, history, deps, { timeoutMs: 90_000 }));
+
+  // ── Red de seguridad DETERMINISTA ────────────────────────────────────────
+  // M3 llama la herramienta de registro de forma intermitente (~2 de 3): a
+  // veces afirma "Hecho: Q135" sin registrar nada. Si el mensaje pedía un
+  // registro y el agente NO registró, lo hacemos con el parser forzado (que
+  // con M3 es 100% confiable) — nunca más un "Hecho" sin dato guardado.
+  if (
+    result.registered.length === 0 &&
+    (REGISTER_INTENT_RE.test(userText) || CLAIM_RE.test(result.text))
+  ) {
+    const outcome = await parseTransactions(userText).catch((err) => {
+      logger.error('red de seguridad: parseo falló', { error: String(err) });
+      return null;
+    });
+    if (outcome && outcome.transactions.length > 0) {
+      logger.warn('red de seguridad: el agente no registró; registro determinista', {
+        userText,
+        reply: result.text,
+        recuperados: outcome.transactions.length,
+      });
+      const sent = await withTyping(chatId, () =>
+        saveAndConfirm(chatId, today, outcome, transcript ?? userText, {
+          header: '✅ Registrado',
+          ...(transcript ? { transcript } : {}),
+        }),
+      );
+      await rememberExchange(transcript ?? userText, sent);
+      return; // saveAndConfirm ya envió y disparó la detección de recurrentes
+    }
+    // Afirmó una acción, no la ejecutó y no hay nada que registrar (ni siquiera
+    // usó una herramienta): estampar la verdad para no dejar creer un guardado.
+    if (!result.usedAnyTool && CLAIM_RE.test(result.text)) {
+      result.text += NO_WRITE_DISCLAIMER;
+    }
+  }
 
   const heard = transcript ? `🎙️ Escuché: "${escapeHtml(transcript)}"\n\n` : '';
   let reply = `${heard}${escapeHtml(result.text)}`;
