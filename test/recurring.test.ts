@@ -131,7 +131,7 @@ describe('recurringForAdvisor', () => {
       record(recurringSlug('servicios', 'Comisión Bimóvil'), 'rejected'),
     ];
     // hoy es día 11; este mes (julio) no hay pagos aún
-    const advisor = recurringForAdvisor(detected, known, [], 11);
+    const advisor = recurringForAdvisor(detected, known, [], 11, '2026-07');
 
     const netflix = advisor.find((a) => a.descripcion === 'Netflix')!;
     expect(netflix.estado).toBe('confirmado');
@@ -151,15 +151,27 @@ describe('recurringForAdvisor', () => {
       txn('2026-06-16', 'Netflix', 108.7, { category: 'suscripciones' }),
     ];
     const julio = [txn('2026-07-10', 'Netflix', 108.7, { category: 'suscripciones' })];
-    const advisor = recurringForAdvisor(detectRecurring(history), [], julio, 11);
+    const advisor = recurringForAdvisor(detectRecurring(history), [], julio, 11, '2026-07');
     expect(advisor[0]!.yaPagadoEsteMes).toBe(true);
     expect(advisor[0]!.aunVieneEsteMes).toBe(false);
   });
 
   it('conserva confirmados que la heurística ya no ve', () => {
-    const advisor = recurringForAdvisor([], [record('x|seguro-anual', 'confirmed', { descripcion: 'Seguro anual', montoTipico: 1200, diaTipico: 20 })], [], 11);
+    const advisor = recurringForAdvisor([], [record('x|seguro-anual', 'confirmed', { descripcion: 'Seguro anual', montoTipico: 1200, diaTipico: 20 })], [], 11, '2026-07');
     expect(advisor).toHaveLength(1);
     expect(advisor[0]!.estado).toBe('confirmado');
     expect(advisor[0]!.aunVieneEsteMes).toBe(true);
+  });
+
+  it('paidThroughMonth marca pagado sin transacción (incidente Tigo/Apple 18-jul)', () => {
+    const tigoSlug = recurringSlug('servicios', 'Tigo');
+    const marcado = record(tigoSlug, 'confirmed', { descripcion: 'Tigo', montoTipico: 329, diaTipico: 6, paidThroughMonth: '2026-07' });
+    // sin transacción de julio, pero marcado pagado este mes → no molesta
+    const advisor = recurringForAdvisor([], [marcado], [], 20, '2026-07');
+    expect(advisor[0]!.yaPagadoEsteMes).toBe(true);
+    expect(advisor[0]!.aunVieneEsteMes).toBe(false);
+    // el marcador de julio NO aplica en agosto
+    const agosto = recurringForAdvisor([], [marcado], [], 20, '2026-08');
+    expect(agosto[0]!.yaPagadoEsteMes).toBe(false);
   });
 });

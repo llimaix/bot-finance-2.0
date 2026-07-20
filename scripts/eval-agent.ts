@@ -180,6 +180,22 @@ const CASES: GoldenCase[] = [
         : `esperaba transferencia (pago de tarjeta) > Q4,000; vino: ${JSON.stringify(first?.transactions)}`;
     },
   },
+  // Incidente 18-20 jul: el guardián recuerda Tigo/Apple; Allan dice que ya
+  // están pagados (cargo automático). Debe MARCARLOS pagados, no solo decir
+  // "ok" — sin la herramienta el guardián seguía insistiendo cada día.
+  {
+    name: 'recurrente ya pagado se marca de verdad (incidente 18-jul)',
+    user: 'Tigo ya está pagado, es automático, no hay que registrar nada de monto',
+    history: [
+      {
+        role: 'assistant',
+        text: '🛡️ Guardián financiero\n\n🔔 No veo el pago de Tigo este mes (~Q329.00, suele caer el día 6). ¿Ya lo pagaste?',
+        at: '2026-07-12T14:30:00Z',
+      },
+    ],
+    expectTools: ['marcar_recurrente_pagado'],
+    forbidTools: ['registrar_movimientos'],
+  },
   {
     name: 'pago en dólares registra en USD',
     user: 'pagué la suscripción de Anthropic con la de crédito, son 100 dólares',
@@ -311,6 +327,8 @@ function buildDeps(
     deleteMovement: async ({ numero }) => track('eliminar_movimiento', { ok: true, eliminado: { numero } }),
     setBudget: async ({ categoria, topeMensual }) =>
       track('fijar_meta', { ok: true, meta: { categoria, topeMensual } }),
+    markRecurringPaid: async ({ descripcion }) =>
+      track('marcar_recurrente_pagado', { ok: true, marcadoPagado: { descripcion, mes: '2026-07' } }),
     searchMovements: async () =>
       track('buscar_movimientos', {
         rango: { desde: '2026-05-01', hasta: '2026-05-31' },

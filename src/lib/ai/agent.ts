@@ -31,8 +31,10 @@ export const ANNOUNCE_RE =
  * y no hubo herramienta de ESCRITURA, se reintenta; si persiste, el sistema
  * estampa la verdad — el usuario nunca debe creer guardado lo que no lo está.
  */
+// Sin \b final: las formas en 1ª persona ("registré", "marqué") terminan en
+// vocal acentuada, que no es carácter de palabra y rompería el boundary.
 export const CLAIM_RE =
-  /✅|\bregistrad[oa]s?\b|\banotad[oa]s?\b|\bguardad[oa]s?\b|\bajustad[oa]s?\b|\beliminad[oa]s?\b|\bborrad[oa]s?\b|paso a memoria|lo apunto|queda marcad/i;
+  /✅|\bregistr(?:ad[oa]s?|[eé])|\banot(?:ad[oa]s?|[eé])|\bguard(?:ad[oa]s?|[eé])|\bagreg(?:ad[oa]s?|u[eé])|\ba[ñn]adid[oa]s?|\bapunt(?:ad[oa]s?|[eé])|\bajust(?:ad[oa]s?|[eé])|\belimin(?:ad[oa]s?|[eé])|\bborr(?:ad[oa]s?|[eé])|\bmarc(?:ad[oa]s?)|\bmarqu[eé]|\bhecho\b|paso a memoria|lo apunto|qued[oó] (?:guardad|registrad|anotad|apuntad|marcad)|sale de tu (?:efectivo|cuenta|saldo)/i;
 
 const WRITE_TOOLS = new Set([
   'registrar_movimientos',
@@ -42,6 +44,7 @@ const WRITE_TOOLS = new Set([
   'fijar_meta',
   'recordar_dato',
   'dia_sin_movimientos',
+  'marcar_recurrente_pagado',
 ]);
 
 const NO_WRITE_DISCLAIMER =
@@ -90,6 +93,7 @@ export interface AgentDeps {
   }) => Promise<unknown>;
   deleteMovement: (input: { numero: number; fecha: string | null }) => Promise<unknown>;
   setBudget: (input: { categoria: string; topeMensual: number | null }) => Promise<unknown>;
+  markRecurringPaid: (input: { descripcion: string }) => Promise<unknown>;
 }
 
 export interface AgentResult {
@@ -198,6 +202,13 @@ export async function runAgent(
           fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
         }),
         execute: async (input) => deps.deleteMovement(input),
+      }),
+
+      marcar_recurrente_pagado: tool({
+        description:
+          'Marca un gasto recurrente como YA PAGADO este mes cuando Allan lo confirme ("Tigo ya está pagado", "eso ya lo pagué") y NO haya que registrar un movimiento nuevo (es un cargo automático ya reflejado en sus saldos). Silencia el recordatorio del guardián sin tocar montos. Da la descripción del recurrente tal como aparece en sus datos.',
+        inputSchema: z.object({ descripcion: z.string().min(2) }),
+        execute: async (input) => deps.markRecurringPaid(input),
       }),
 
       fijar_meta: tool({

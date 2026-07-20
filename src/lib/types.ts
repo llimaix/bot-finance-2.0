@@ -117,6 +117,10 @@ export interface RecurringRecord {
   diaTipico: number;
   status: RecurringStatus;
   source: 'auto' | 'user';
+  /** yyyy-mm hasta el cual Allan confirmó el pago SIN registrar transacción
+   *  (cargos automáticos ya horneados en los saldos): el guardián no molesta
+   *  ese mes. Ausente = solo cuenta como pagado si hay transacción. */
+  paidThroughMonth?: string;
   createdAt: string;
   updatedAt: string;
 }

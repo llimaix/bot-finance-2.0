@@ -9,7 +9,7 @@ import { resolveCategory } from './categories';
 import { computeAggregates } from './aggregates';
 import { registrationWarnings } from './guards';
 import { loadAdvisorData, loadBalancesReadonly, renderProjection } from './insights';
-import { detectRecurring, findNewCandidates } from './recurring';
+import { detectRecurring, findNewCandidates, normalizeDesc } from './recurring';
 import { summarizeSearch } from './search';
 import { renderCosto, summarizeUsage } from './usage';
 import type { RecurringPayment } from './recurring';
@@ -337,6 +337,26 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       const to = desde <= hasta ? hasta : desde;
       const txns = await queryRange(from, to);
       return { rango: { desde: from, hasta: to }, ...summarizeSearch(txns, { categoria, texto }) };
+    },
+    markRecurringPaid: async ({ descripcion }) => {
+      const needle = normalizeDesc(descripcion);
+      const confirmed = (await listRecurring()).filter((r) => r.status === 'confirmed');
+      const match =
+        confirmed.find((r) => normalizeDesc(r.descripcion) === needle) ??
+        confirmed.find((r) => {
+          const n = normalizeDesc(r.descripcion);
+          return n.includes(needle) || needle.includes(n);
+        });
+      if (!match) {
+        return {
+          ok: false,
+          error: `No encuentro un recurrente confirmado que coincida con "${descripcion}"`,
+          recurrentesConfirmados: confirmed.map((r) => r.descripcion),
+        };
+      }
+      const month = monthPrefixGT(0);
+      await putRecurring({ ...match, paidThroughMonth: month, updatedAt: new Date().toISOString() });
+      return { ok: true, marcadoPagado: { descripcion: match.descripcion, mes: month } };
     },
     setBudget: async ({ categoria, topeMensual }) => {
       const category = categoria.trim().toLowerCase();

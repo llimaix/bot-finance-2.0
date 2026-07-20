@@ -18,7 +18,7 @@ export interface RecurringPayment {
 const MONTH_WORDS =
   /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/g;
 
-function normalizeDesc(desc: string): string {
+export function normalizeDesc(desc: string): string {
   return desc
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
@@ -131,11 +131,15 @@ export function recurringForAdvisor(
   known: ReadonlyArray<RecurringRecord>,
   monthTxns: ReadonlyArray<Transaction>,
   todayDay: number,
+  currentMonth: string,
 ): AdvisorRecurring[] {
   const byStatus = new Map(known.map((r) => [r.slug, r]));
-  const paidSlugs = new Set(
-    monthTxns.filter((t) => t.type === 'gasto' || t.type === 'ingreso').map((t) => txnRecurringKey(t)),
-  );
+  // "Pagado este mes" = hay transacción con ese concepto, O Allan lo confirmó
+  // pagado sin registrarlo (cargo automático ya horneado en los saldos).
+  const paidSlugs = new Set([
+    ...monthTxns.filter((t) => t.type === 'gasto' || t.type === 'ingreso').map((t) => txnRecurringKey(t)),
+    ...known.filter((r) => r.paidThroughMonth === currentMonth).map((r) => r.slug),
+  ]);
 
   const fromDetected: AdvisorRecurring[] = detected
     .filter((d) => byStatus.get(d.slug)?.status !== 'rejected')

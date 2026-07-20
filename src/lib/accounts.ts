@@ -92,7 +92,7 @@ export function renderSaldos(balances: ReadonlyArray<AccountBalance>): string {
     // <fecha>" cuando significa lo contrario (base anclada + N ya aplicados).
     const detalle =
       b.movements > 0
-        ? `incluye tus ${b.movements === 1 ? 'último movimiento' : `últimos ${b.movements} movimientos`}`
+        ? `incluye tu${b.movements === 1 ? ' último movimiento' : `s últimos ${b.movements} movimientos`}`
         : `sin movimientos desde el ${b.asOf}`;
     lines.push(`${b.emoji} ${b.name}: ${formatQ(b.balance)}${flag}  <i>(${detalle})</i>`);
   }

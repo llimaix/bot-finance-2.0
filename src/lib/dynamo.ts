@@ -234,6 +234,7 @@ export async function listRecurring(): Promise<RecurringRecord[]> {
     diaTipico: it.diaTipico as number,
     status: it.status as RecurringRecord['status'],
     source: it.source as RecurringRecord['source'],
+    ...(it.paidThroughMonth ? { paidThroughMonth: it.paidThroughMonth as string } : {}),
     createdAt: it.createdAt as string,
     updatedAt: it.updatedAt as string,
   }));

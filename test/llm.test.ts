@@ -131,3 +131,13 @@ describe('CLAIM_RE (afirmación sin escritura)', () => {
     expect(CLAIM_RE.test('En mayo gastaste Q716 en farmacias.')).toBe(false);
   });
 });
+
+describe('CLAIM_RE ampliado (incidente cena "Hecho")', () => {
+  it('cubre "Hecho", "sale de tu efectivo" y primera persona', async () => {
+    const { CLAIM_RE } = await import('../src/lib/ai/agent');
+    expect(CLAIM_RE.test('Hecho: Q150 de cena, efectivo.')).toBe(true);
+    expect(CLAIM_RE.test('Entendido: Q100 perdidos en apuesta, sale de tu efectivo.')).toBe(true);
+    expect(CLAIM_RE.test('Ya registré tus Q45 de almuerzo.')).toBe(true);
+    expect(CLAIM_RE.test('Lo marqué como pagado este mes.')).toBe(true);
+  });
+});

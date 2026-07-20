@@ -64,7 +64,7 @@ export async function loadAdvisorData(today: string, daysInCurrentMonth: number)
   // hábil), no el día mediano observado — de esto depende la proyección.
   const [q1, q2] = paydaysOfMonth(monthPrefixGT(0));
   const recurrentes = applySalaryCalendar(
-    recurringForAdvisor(detected, knownRecurring, monthTxns, daysElapsed),
+    recurringForAdvisor(detected, knownRecurring, monthTxns, daysElapsed, monthPrefixGT(0)),
     [Number(q1.slice(8)), Number(q2.slice(8))],
     daysElapsed,
   );
