@@ -41,6 +41,20 @@ describe('registrationWarnings', () => {
     expect(warnings[0]).toContain('Monto grande');
   });
 
+  it('gasto con método "na" (cuenta desconocida) pide la cuenta y no afecta saldos', () => {
+    const sinCuenta = txn({ shortId: 5, method: 'na', description: 'unas cosas' });
+    const warnings = registrationWarnings([sinCuenta], [sinCuenta]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('SIN cuenta');
+    expect(warnings[0]).toMatch(/crédito.*débito.*efectivo/);
+  });
+
+  it('gasto con método real NO dispara el aviso de cuenta desconocida', () => {
+    const conCuenta = txn({ shortId: 6, method: 'debito' });
+    const warnings = registrationWarnings([conCuenta], [conCuenta]);
+    expect(warnings.filter((w) => w.includes('SIN cuenta'))).toHaveLength(0);
+  });
+
   it('incidente 11-jul: mismo monto + descripción similar avisa aunque cambie la categoría', () => {
     const existente = txn({
       sk: 'TXN#2026-07-11#viejo',

@@ -196,6 +196,28 @@ const CASES: GoldenCase[] = [
     expectTools: ['marcar_recurrente_pagado'],
     forbidTools: ['registrar_movimientos'],
   },
+  // "Ante cualquier duda, preguntar": un gasto sin método claro NO se registra
+  // con 'na' (inflaría el neto sin tocar cuenta); el agente pregunta la cuenta.
+  {
+    name: 'gasto sin cuenta clara pregunta el método',
+    user: 'gasté 50 quetzales en unas cosas',
+    expectTools: [],
+    forbidTools: [],
+    check: (inputs, reply) => {
+      const first = inputs['registrar_movimientos']?.[0] as
+        | { transactions: Array<{ type: string; method: string }> }
+        | undefined;
+      // Si registró, NUNCA un gasto con method 'na'.
+      if (first?.transactions.some((t) => t.type === 'gasto' && t.method === 'na')) {
+        return 'registró un gasto con método "na" en vez de preguntar la cuenta';
+      }
+      // Si NO registró, debe preguntar por la cuenta.
+      if (!first && !/cr[eé]dito|d[eé]bito|efectivo|cu[eé]nta|c[oó]mo (?:lo )?pagaste/i.test(reply)) {
+        return `no registró pero tampoco preguntó la cuenta: "${reply.slice(0, 120)}"`;
+      }
+      return null;
+    },
+  },
   {
     name: 'pago en dólares registra en USD',
     user: 'pagué la suscripción de Anthropic con la de crédito, son 100 dólares',

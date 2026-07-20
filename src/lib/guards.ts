@@ -60,6 +60,13 @@ export function registrationWarnings(
     if (txn.amount >= BIG_AMOUNT_THRESHOLD) {
       warnings.push(`👀 Monto grande en #${txn.shortId}: ${formatQ(txn.amount)}. ¿Es correcto?`);
     }
+    // Un gasto/retiro SIN cuenta (method 'na') no afecta ningún saldo pero sí
+    // cuenta como gasto → infla el neto. No adivinamos la cuenta: preguntamos.
+    if ((txn.type === 'gasto' || txn.type === 'retiro') && txn.method === 'na') {
+      warnings.push(
+        `❓ #${txn.shortId} (${txn.description}) quedó SIN cuenta asignada, así que no está afectando tus saldos. ¿De dónde salió: crédito, débito o efectivo? Dímelo y lo corrijo.`,
+      );
+    }
   }
 
   return warnings;
