@@ -218,6 +218,19 @@ const CASES: GoldenCase[] = [
       return null;
     },
   },
+  // Incidente 21-jul: con movimientos SOLO de ayer, "hoy no hubieron movimientos"
+  // debe marcar el día sin confundir los de ayer con los de hoy.
+  {
+    name: 'hoy nada no confunde ayer con hoy (incidente 21-jul)',
+    user: 'Hoy no hubieron movimientos',
+    expectTools: ['dia_sin_movimientos'],
+    forbidTools: ['registrar_movimientos', 'corregir_movimiento', 'eliminar_movimiento'],
+    recent: 'solo-ayer',
+    check: (_inputs, reply) =>
+      /hoy (?:ya )?(?:hay|tienes|ten[eé]s|se registr|tenemos|est[aá]n)/i.test(reply)
+        ? `trató los movimientos de ayer como de hoy: "${reply.slice(0, 120)}"`
+        : null,
+  },
   {
     name: 'pago en dólares registra en USD',
     user: 'pagué la suscripción de Anthropic con la de crédito, son 100 dólares',
@@ -279,24 +292,31 @@ const CONTEXT_BASE = [
   'Hechos que Allan te ha enseñado:\n- Energuate es su pago de energía eléctrica (categoría servicios).',
 ];
 
-const RECENT_HEADER =
-  'Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:';
-
-// Mismo formato que produce agentFlow: HOY/AYER explícito + fecha.
-const RECENT_YESTERDAY = [
-  '- #1 AYER (2026-07-11) Q1,000.00 debito retiro · Retiro de cajero para gastos de préstamos',
-  '- #2 AYER (2026-07-11) Q1,000.00 debito retiro · Retiro para salida con amigos',
-  '- #3 AYER (2026-07-11) Q10.00 efectivo gasto · Pago de gym',
+// Mismo formato de DOS SECCIONES que produce agentFlow (renderRecentSection).
+const AYER = [
+  '  - #1 Q1,000.00 debito retiro · Retiro de cajero para gastos de préstamos',
+  '  - #2 Q1,000.00 debito retiro · Retiro para salida con amigos',
+  '  - #3 Q10.00 efectivo gasto · Pago de gym',
 ];
 
-const RECENT_TODAY = [
-  '- #1 HOY (2026-07-12) Q120.00 efectivo gasto · Cena con novia',
-  '- #2 HOY (2026-07-12) Q78.51 credito gasto · SAT2000',
-  '- #3 HOY (2026-07-12) Q75.00 credito gasto · SAT2000',
-  '- #4 HOY (2026-07-12) Q153.00 credito gasto · Neonet Guatemala',
-  '- #5 HOY (2026-07-12) Q195.00 credito gasto · Claro',
-  '- #6 HOY (2026-07-12) Q329.00 credito gasto · Internet residencial',
+const HOY = [
+  '  - #1 Q120.00 efectivo gasto · Cena con novia',
+  '  - #2 Q78.51 credito gasto · SAT2000',
+  '  - #3 Q75.00 credito gasto · SAT2000',
+  '  - #4 Q153.00 credito gasto · Neonet Guatemala',
+  '  - #5 Q195.00 credito gasto · Claro',
+  '  - #6 Q329.00 credito gasto · Internet residencial',
 ];
+
+function recentSections(recent: 'completo' | 'solo-ayer'): string {
+  const hoy = recent === 'solo-ayer' ? [] : HOY;
+  const secHoy =
+    hoy.length === 0
+      ? 'Movimientos registrados HOY (2026-07-12): NINGUNO'
+      : `Movimientos registrados HOY (2026-07-12): ${hoy.length}\n${hoy.join('\n')}`;
+  const secAyer = `Movimientos registrados AYER (2026-07-11): ${AYER.length}\n${AYER.join('\n')}`;
+  return `${secHoy}\n${secAyer}\nLos movimientos de arriba YA están registrados: NO los vuelvas a registrar. Si alguno hay que cambiarlo, usa corregir_movimiento/eliminar_movimiento con su número y su fecha.`;
+}
 
 function buildDeps(
   called: string[],
@@ -308,11 +328,9 @@ function buildDeps(
     if (input !== undefined) (inputs[name] ??= []).push(input);
     return value;
   };
-  const recent =
-    opts.recent === 'solo-ayer' ? RECENT_YESTERDAY : [...RECENT_YESTERDAY, ...RECENT_TODAY];
   return {
     today: '2026-07-12',
-    contextInfo: [...CONTEXT_BASE, [RECENT_HEADER, ...recent].join('\n')].join('\n'),
+    contextInfo: [...CONTEXT_BASE, recentSections(opts.recent ?? 'completo')].join('\n'),
     register: async (input) =>
       track(
         'registrar_movimientos',

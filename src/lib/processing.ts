@@ -238,6 +238,14 @@ async function route(message: TelegramMessage): Promise<void> {
 
 // ── Agente conversacional (texto y voz) ────────────────────────────────────
 
+/** Sección HOY/AYER del contexto del agente, con "NINGUNO" explícito. */
+function renderRecentSection(etiqueta: 'HOY' | 'AYER', fecha: string, movs: ReadonlyArray<Transaction>): string {
+  const header = `Movimientos registrados ${etiqueta} (${fecha}): ${movs.length === 0 ? (etiqueta === 'HOY' ? 'NINGUNO' : 'ninguno') : movs.length}`;
+  if (movs.length === 0) return header;
+  const lines = movs.map((t) => `  - #${t.shortId} ${formatQ(t.amount)} ${t.method} ${t.type} · ${t.description}`);
+  return `${header}\n${lines.join('\n')}`;
+}
+
 async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {
   await sendTyping(chatId);
   const [history, balances, cats, facts, recent] = await Promise.all([
@@ -256,18 +264,12 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     ...(facts.length > 0
       ? [`Hechos que Allan te ha enseñado:\n${facts.map((f) => `- ${f.text}`).join('\n')}`]
       : []),
-    ...(recent.length > 0
-      ? [
-          // HOY/AYER explícito por línea: el modelo no debe mapear fechas crudas
-          // a "hoy" (el 14-jul atribuyó a hoy un gasto de ayer y generó fricción).
-          `Movimientos ya registrados (ayer y hoy) — NO los vuelvas a registrar; si algo aquí hay que cambiar, usa corregir_movimiento/eliminar_movimiento con su número y fecha:\n${recent
-            .map(
-              (t) =>
-                `- #${t.shortId} ${t.date === today ? 'HOY' : 'AYER'} (${t.date}) ${formatQ(t.amount)} ${t.method} ${t.type} · ${t.description}`,
-            )
-            .join('\n')}`,
-        ]
-      : []),
+    // Dos secciones TAJANTES HOY vs AYER: en una lista mezclada M3 confundía
+    // los de ayer con los de hoy (21-jul: dijo "hoy hay 2 movimientos" que en
+    // realidad eran de ayer). "HOY: NINGUNO" es la señal directa para "hoy nada".
+    renderRecentSection('HOY', today, recent.filter((t) => t.date === today)),
+    renderRecentSection('AYER', daysAgoGT(1), recent.filter((t) => t.date !== today)),
+    'Los movimientos de arriba YA están registrados: NO los vuelvas a registrar. Si alguno hay que cambiarlo, usa corregir_movimiento/eliminar_movimiento con su número y su fecha.',
   ].join('\n');
 
   const collectedWarnings: string[] = [];

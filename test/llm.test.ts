@@ -188,6 +188,10 @@ describe('needsNoWriteDisclaimer (honestidad sin falsos positivos)', () => {
     expect(needsNoWriteDisclaimer(false, 'De hecho tenés Q3,190 en BI.')).toBe(false);
     // pero "Hecho: Q150 de cena" (confirmación falsa) sí
     expect(needsNoWriteDisclaimer(false, 'Hecho: Q150 de cena, efectivo.')).toBe(true);
+    // "¿quieres que los borre?" (subjuntivo de una PREGUNTA) NO es una escritura
+    expect(needsNoWriteDisclaimer(false, '¿Quieres que los borre o los dejamos?')).toBe(false);
+    // "borré el #3" (pasado, afirmación real) sí
+    expect(needsNoWriteDisclaimer(false, 'Listo, borré el #3 de hoy.')).toBe(true);
   });
 });
 

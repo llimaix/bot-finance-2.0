@@ -56,9 +56,11 @@ export const REGISTER_INTENT_RE =
   /\b(gast|pagu[eé]|pag(?:o|u[eé]|amos|ad)|compr|retir|dep[oó]sit|deposit|ingres|me cay[oó]|cobr|registr|anot)\w*/i;
 
 /** Afirmación de ESCRITURA (registrar/ajustar/marcar…), SIN el ✅ suelto: los
- *  veredictos de compra empiezan con "✅ Sí te alcanza" y NO son una escritura. */
+ *  veredictos de compra empiezan con "✅ Sí te alcanza" y NO son una escritura.
+ *  Las formas en -é exigen la tilde: "borré/registré" (pasado, afirmación) pero
+ *  NO "¿que los borre?"/"que registre" (subjuntivo de una pregunta). */
 export const WRITE_CLAIM_RE =
-  /\bregistr(?:ad[oa]s?|[eé])|\banot(?:ad[oa]s?|[eé])|\bguard(?:ad[oa]s?|[eé])|\bagreg(?:ad[oa]s?|u[eé])|\ba[ñn]adid[oa]s?|\bapunt(?:ad[oa]s?|[eé])|\bajust(?:ad[oa]s?|[eé])|\belimin(?:ad[oa]s?|[eé])|\bborr(?:ad[oa]s?|[eé])|\bmarc(?:ad[oa]s?)|\bmarqu[eé]|(?<!de )\bhecho\b|paso a memoria|lo apunto|qued[oó] (?:guardad|registrad|anotad|apuntad|marcad)|sale de tu (?:efectivo|cuenta|saldo)/i;
+  /\bregistr(?:ad[oa]s?|é)|\banot(?:ad[oa]s?|é)|\bguard(?:ad[oa]s?|é)|\bagreg(?:ad[oa]s?|ué)|\ba[ñn]adid[oa]s?|\bapunt(?:ad[oa]s?|é)|\bajust(?:ad[oa]s?|é)|\belimin(?:ad[oa]s?|é)|\bborr(?:ad[oa]s?|é)|\bmarc(?:ad[oa]s?)|\bmarqué|(?<!de )\bhecho\b|paso a memoria|lo apunto|qued[oó] (?:guardad|registrad|anotad|apuntad|marcad)|sale de tu (?:efectivo|cuenta|saldo)/i;
 
 /**
  * ¿Debe la red de seguridad determinista intentar registrar? SOLO si el agente
