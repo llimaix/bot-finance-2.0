@@ -415,11 +415,17 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       logger.error('red de seguridad: parseo falló', { error: String(err) });
       return null;
     });
-    if (outcome && outcome.transactions.length > 0) {
-      logger.warn('red de seguridad: el agente no registró; registro determinista', {
+    // Actúa si hay algo que registrar O una aclaración pendiente (p.ej. método
+    // desconocido): antes, si el parser retenía el gasto para PREGUNTAR la
+    // cuenta, la red descartaba la pregunta en silencio y el gasto se perdía
+    // (incidente 20-jul: "pago Q10 GYM" sin método → gym perdido). saveAndConfirm
+    // registra si hay txns, o envía la aclaración si solo hay pregunta.
+    if (outcome && (outcome.transactions.length > 0 || outcome.clarification)) {
+      logger.warn('red de seguridad: el agente no registró; recupero por parser', {
         userText,
         reply: result.text,
         recuperados: outcome.transactions.length,
+        clarification: outcome.clarification ?? undefined,
       });
       const sent = await withTyping(chatId, () =>
         saveAndConfirm(chatId, today, outcome, transcript ?? userText, {
@@ -428,7 +434,7 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
         }),
       );
       await rememberExchange(transcript ?? userText, sent);
-      return; // saveAndConfirm ya envió y disparó la detección de recurrentes
+      return; // saveAndConfirm ya envió (registro o pregunta) y disparó recurrentes
     }
   }
   // Afirmó una ESCRITURA que no ejecutó (y no se recuperó arriba): estampar la

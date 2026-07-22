@@ -20,8 +20,12 @@ const DEFAULT_AGENT_TIMEOUT_MS = 20_000;
  * estatus"). Si el texto final huele a promesa y no hubo herramientas, se
  * reintenta UNA vez con un empujón explícito.
  */
+// "espera" es ambiguo: anuncio ("esperá un momento") vs consejo ("espera hasta
+// el 8 de agosto"). Solo cuenta como anuncio si le sigue el contexto de espera
+// ("un momento", "mientras...", "a que reviso") — no un bare "espera" que
+// también aparece en recomendaciones legítimas (validación 21-jul).
 export const ANNOUNCE_RE =
-  /esper[aáe]|un momento|un segundo|estoy (consultando|revisando|buscando|verificando)|voy a (consultar|revisar|buscar|verificar)|d[eé]jame (ver|revisar|consultar)/i;
+  /un momento|un segundo|esper[aá](?:me|nos)?\s+(?:un|unos|tantito|mientras|a que|en lo que|que (?:reviso|consulto|verifico|busco))|estoy (?:consultando|revisando|buscando|verificando)|voy a (?:consultar|revisar|buscar|verificar)|d[eé]jame (?:ver|revisar|consultar)/i;
 
 /**
  * "Afirmación sin escritura": la variante retrospectiva del mismo mal — el

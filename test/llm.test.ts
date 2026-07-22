@@ -112,6 +112,14 @@ describe('ANNOUNCE_RE (anuncio sin acción)', () => {
     const { ANNOUNCE_RE } = await import('../src/lib/ai/agent');
     expect(ANNOUNCE_RE.test('Tenés Q2,101.01 en BI y Q40 en Banrural.')).toBe(false);
     expect(ANNOUNCE_RE.test('Listo, registré tus Q45 de almuerzo.')).toBe(false);
+    // contenido/consejo con "espera(r)" NO debe disparar reintento (validación 21-jul)
+    expect(ANNOUNCE_RE.test('No hay ventaja en esperar al 8 de agosto.')).toBe(false);
+    expect(ANNOUNCE_RE.test('Estás esperando tu quincena del 15.')).toBe(false);
+    expect(ANNOUNCE_RE.test('Espera hasta el 8 de agosto para pagar la tarjeta.')).toBe(false);
+    expect(ANNOUNCE_RE.test('Mejor espera y paga cerca del límite.')).toBe(false);
+    // pero el anuncio real sí
+    expect(ANNOUNCE_RE.test('Espera un momento, estoy revisando.')).toBe(true);
+    expect(ANNOUNCE_RE.test('Dame un segundo mientras consulto.')).toBe(true);
   });
 });
 

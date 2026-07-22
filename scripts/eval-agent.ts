@@ -140,10 +140,12 @@ const CASES: GoldenCase[] = [
     ],
     expectTools: [],
     forbidTools: ['registrar_movimientos', 'dia_sin_movimientos'],
+    // El bug original fue responder con un VOLCADO de estatus en vez de decidir.
+    // Eso es lo que guardamos; el fraseo de la recomendación lo deja libre a M3.
     check: (_inputs, reply) => {
-      if (/tu estatus/i.test(reply)) return 'respondió con un volcado de estatus en vez de la decisión';
-      if (!/recomiendo|conviene|mejor|\bpaga\b|\bpagar\b|\bpagas\b|espera|apart/i.test(reply)) {
-        return `no se lee una recomendación clara: "${reply.slice(0, 120)}"`;
+      const montos = reply.match(/Q-?[\d,]+\.\d{2}/g)?.length ?? 0;
+      if (/tu estatus/i.test(reply) || montos >= 4) {
+        return `respondió con un volcado de estatus (${montos} montos) en vez de la decisión`;
       }
       return null;
     },
