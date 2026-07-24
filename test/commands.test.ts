@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchCommand, matchCorrection } from '../src/lib/commands';
+import { matchCommand, matchCorrection, matchMethodAnswer } from '../src/lib/commands';
 
 describe('matchCommand', () => {
   it('reconoce los comandos base', () => {
@@ -113,5 +113,24 @@ describe('matchCorrection', () => {
     expect(matchCorrection('gasté Q45 en almuerzo')).toBeNull();
     expect(matchCorrection('corrige')).toBeNull();
     expect(matchCorrection('corrige #2')).toBeNull();
+  });
+});
+
+describe('matchMethodAnswer (respuesta de "¿de qué cuenta?")', () => {
+  it('reconoce respuestas de método puras y las normaliza', () => {
+    expect(matchMethodAnswer('Tarjeta crédito')).toBe('credito');
+    expect(matchMethodAnswer('crédito')).toBe('credito');
+    expect(matchMethodAnswer('fue con débito')).toBe('debito');
+    expect(matchMethodAnswer('con la de crédito')).toBe('credito');
+    expect(matchMethodAnswer('efectivo')).toBe('efectivo');
+    expect(matchMethodAnswer('salió de débito')).toBe('debito');
+    expect(matchMethodAnswer('Débito BI')).toBe('debito');
+  });
+
+  it('NO matchea un gasto nuevo que menciona el método (tiene más contenido)', () => {
+    expect(matchMethodAnswer('gasté Q50 con débito')).toBeNull();
+    expect(matchMethodAnswer('compré botas por Q450 en efectivo')).toBeNull();
+    expect(matchMethodAnswer('¿cuánto gasté con crédito este mes?')).toBeNull();
+    expect(matchMethodAnswer('hola')).toBeNull();
   });
 });

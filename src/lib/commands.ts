@@ -1,5 +1,5 @@
 import { ACCOUNT_IDS } from './types';
-import type { AccountId } from './types';
+import type { AccountId, Method } from './types';
 
 export type Command =
   | { kind: 'hoy' }
@@ -104,6 +104,23 @@ export function matchCorrection(text: string): Correction | null {
   const correction = m[2]!.trim();
   if (!Number.isInteger(shortId) || shortId <= 0 || !correction) return null;
   return { shortId, text: correction };
+}
+
+// Respuesta a "¿de qué cuenta salió?": el mensaje es SOLO el método (con
+// rellenos permitidos), no un gasto nuevo. Anclado a ^...$ con lista blanca de
+// rellenos → "gasté Q50 con débito" NO matchea (tiene palabras fuera de lista).
+const METHOD_ANSWER_RE =
+  /^\s*(?:(?:fue|es|era|lo\s+pagu[eé]|sali[oó]|con|de|la|el|una|tarjeta|del|banco|bac|bi)\s+)*(cr[eé]dito|d[eé]bito|efectivo)(?:\s+(?:bac|bi|contado|del\s+banco|de\s+bi))?\s*[.!]*\s*$/i;
+
+/** Detecta un mensaje que es SOLO la respuesta del método/cuenta ("Tarjeta
+ *  crédito", "fue con débito", "efectivo"). Devuelve el método normalizado. */
+export function matchMethodAnswer(text: string): Method | null {
+  const m = text.trim().match(METHOD_ANSWER_RE);
+  if (!m) return null;
+  const raw = m[1]!.toLowerCase();
+  if (raw.startsWith('cr')) return 'credito';
+  if (raw.startsWith('d')) return 'debito';
+  return 'efectivo';
 }
 
 export const HELP_TEXT = [

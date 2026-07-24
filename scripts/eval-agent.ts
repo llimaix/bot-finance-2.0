@@ -200,24 +200,20 @@ const CASES: GoldenCase[] = [
   },
   // "Ante cualquier duda, preguntar": un gasto sin método claro NO se registra
   // con 'na' (inflaría el neto sin tocar cuenta); el agente pregunta la cuenta.
+  // Un gasto sin método claro se REGISTRA igual (con 'na', cuenta pendiente):
+  // nunca se pierde. El sistema pregunta la cuenta después (guarda/completación
+  // determinista), no el agente reteniéndolo — retenerlo perdía el dato (TV 24-jul).
   {
-    name: 'gasto sin cuenta clara pregunta el método',
+    name: 'gasto sin cuenta clara se registra (cuenta pendiente)',
     user: 'gasté 50 quetzales en unas cosas',
-    expectTools: [],
-    forbidTools: [],
-    check: (inputs, reply) => {
+    expectTools: ['registrar_movimientos'],
+    check: (inputs) => {
       const first = inputs['registrar_movimientos']?.[0] as
-        | { transactions: Array<{ type: string; method: string }> }
+        | { transactions: Array<{ amount: number; type: string }> }
         | undefined;
-      // Si registró, NUNCA un gasto con method 'na'.
-      if (first?.transactions.some((t) => t.type === 'gasto' && t.method === 'na')) {
-        return 'registró un gasto con método "na" en vez de preguntar la cuenta';
-      }
-      // Si NO registró, debe preguntar por la cuenta.
-      if (!first && !/cr[eé]dito|d[eé]bito|efectivo|cu[eé]nta|c[oó]mo (?:lo )?pagaste/i.test(reply)) {
-        return `no registró pero tampoco preguntó la cuenta: "${reply.slice(0, 120)}"`;
-      }
-      return null;
+      return first?.transactions.some((t) => t.amount === 50 && t.type === 'gasto')
+        ? null
+        : `esperaba un gasto de Q50 registrado; vino: ${JSON.stringify(first?.transactions)}`;
     },
   },
   // Incidente 21-jul: con movimientos SOLO de ayer, "hoy no hubieron movimientos"

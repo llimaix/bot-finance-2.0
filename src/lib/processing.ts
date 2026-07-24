@@ -13,7 +13,7 @@ import { detectRecurring, findNewCandidates, normalizeDesc } from './recurring';
 import { summarizeSearch } from './search';
 import { renderCosto, summarizeUsage } from './usage';
 import type { RecurringPayment } from './recurring';
-import { HELP_TEXT, matchCommand, matchCorrection } from './commands';
+import { HELP_TEXT, matchCommand, matchCorrection, matchMethodAnswer } from './commands';
 import type { Command } from './commands';
 import { daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from './dates';
 import {
@@ -66,7 +66,7 @@ import type {
   TelegramMessage,
   TelegramUpdate,
 } from './telegram';
-import type { Transaction } from './types';
+import type { Method, Transaction } from './types';
 
 /**
  * Procesamiento del update de Telegram (corre en la Lambda processor, invocada
@@ -233,7 +233,43 @@ async function route(message: TelegramMessage): Promise<void> {
     return;
   }
 
+  // Respuesta a "¿de qué cuenta salió?": aplica el método al gasto pendiente
+  // (method 'na') de forma DETERMINISTA — antes dependía de que M3 lo
+  // reconstruyera de memoria y se perdía el dato (incidente TV 24-jul).
+  const methodAnswer = matchMethodAnswer(text);
+  if (methodAnswer) {
+    const sent = await completePendingMethod(chatId, today, methodAnswer);
+    if (sent) {
+      await rememberExchange(text, sent);
+      return;
+    }
+    // sin gasto pendiente: quizá no era una respuesta de método → sigue al agente
+  }
+
   await agentFlow(chatId, today, text);
+}
+
+/** Aplica el método al gasto/retiro con cuenta pendiente ('na') más reciente.
+ *  Devuelve la confirmación, o null si no había ninguno pendiente. */
+async function completePendingMethod(chatId: number, today: string, method: Method): Promise<string | null> {
+  const recent = await queryRange(daysAgoGT(1), today);
+  const pend = recent
+    .filter((t) => (t.type === 'gasto' || t.type === 'retiro') && t.method === 'na')
+    .at(-1);
+  if (!pend) return null;
+  await updateTransactionFields(pend.sk, {
+    amount: pend.amount,
+    type: pend.type,
+    category: pend.category,
+    method,
+    description: pend.description,
+    emoji: pend.emoji ?? '🏷️',
+  });
+  const after: Transaction = { ...pend, method };
+  const reply = `✅ Listo, apliqué ${method} a:\n${renderTxnLine(after)}${pend.date !== today ? ` · 📅 ${pend.date}` : ''}`;
+  await sendMessage(chatId, reply);
+  logger.info('método pendiente aplicado', { sk: pend.sk, method, amount: pend.amount });
+  return reply;
 }
 
 // ── Agente conversacional (texto y voz) ────────────────────────────────────
