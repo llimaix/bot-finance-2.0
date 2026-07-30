@@ -39,6 +39,17 @@ export function escapeHtml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+/**
+ * Bloque <code> (monoespaciado, copiable de un toque en Telegram) con el
+ * contenido ESCAPADO. Escribir a mano "/saldo efectivo <monto>" en un mensaje
+ * HTML tira el envío entero con 400 "Unsupported start tag" (incidente 29/30-jul:
+ * el guardián diario no llegó durante dos días). Con este helper el placeholder
+ * se escribe natural y el escapado va incluido.
+ */
+export function code(text: string): string {
+  return `<code>${escapeHtml(text)}</code>`;
+}
+
 /** "2. 🍽️ Comida — Q45.00 — efectivo" */
 export function renderTxnLine(txn: Transaction): string {
   const parts = [`${emojiFor(txn)} ${escapeHtml(prefixed(txn))}`, formatQ(txn.amount)];

@@ -5,7 +5,7 @@ import { budgetProgress } from './budgets';
 import type { BudgetProgress } from './budgets';
 import { daysAgoGT, daysElapsedInMonthGT, monthPrefixGT, nextPaydayAfter, paydaysOfMonth } from './dates';
 import { listAccounts, listBudgets, listRecurring, queryMonth, queryRange } from './dynamo';
-import { escapeHtml, formatQ } from './format';
+import { code, escapeHtml, formatQ } from './format';
 import { computeProjection } from './projection';
 import type { Projection } from './projection';
 import { applySalaryCalendar, detectRecurring, recurringForAdvisor } from './recurring';
@@ -210,7 +210,7 @@ export function guardianFindings(data: AdvisorData): string[] {
   for (const b of data.balances) {
     if ((b.id === 'efectivo' || b.id === 'kash') && b.balance < 0) {
       findings.push(
-        `${b.emoji} Tu ${b.name} calculado quedó en ${formatQ(b.balance)}: probablemente hubo un ingreso de dinero que no registraste. Ajusta con /saldo ${b.id} <monto>.`,
+        `${b.emoji} Tu ${b.name} calculado quedó en ${formatQ(b.balance)}: probablemente hubo un ingreso de dinero que no registraste. Ajusta con ${code(`/saldo ${b.id} <monto>`)}.`,
       );
     }
   }

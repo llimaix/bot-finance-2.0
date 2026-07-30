@@ -47,6 +47,7 @@ import {
   updateTransactionFields,
 } from './dynamo';
 import {
+  code,
   escapeHtml,
   formatQ,
   renderConfirmation,
@@ -808,7 +809,7 @@ async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
     } else {
       const category = data.slice(6);
       await answerCallbackQuery(callback.id, 'Anotado, sin meta');
-      await sendMessage(chatId, `👍 Sin meta en ${escapeHtml(category)}. Puedes ponerla luego con /metas ${escapeHtml(category)} <monto>.`);
+      await sendMessage(chatId, `👍 Sin meta en ${escapeHtml(category)}. Puedes ponerla luego con ${code(`/metas ${category} <monto>`)}.`);
     }
     return;
   }
@@ -927,7 +928,7 @@ async function handleCommand(chatId: number, today: string, command: Command): P
       if (command.invalidArgs) {
         await sendMessage(
           chatId,
-          'Uso: /saldo — ver saldos, o /saldo <cuenta> <monto> para ajustar la semilla.\nCuentas: banco, banrural, tarjeta, efectivo, kash. Ej: /saldo efectivo 350',
+          `Uso: /saldo — ver saldos, o ${code('/saldo <cuenta> <monto>')} para ajustar la semilla.\nCuentas: banco, banrural, tarjeta, efectivo, kash. Ej: ${code('/saldo efectivo 350')}`,
         );
         return;
       }
