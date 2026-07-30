@@ -59,6 +59,18 @@ interface TelegramResponse<T> {
   description?: string;
 }
 
+/** Error del Bot API con la causa cruda, para poder decidir según `description`. */
+export class TelegramApiError extends Error {
+  constructor(
+    readonly method: string,
+    readonly status: number,
+    readonly description: string,
+  ) {
+    super(`Telegram ${method} falló: ${description}`);
+    this.name = 'TelegramApiError';
+  }
+}
+
 const MAX_ATTEMPTS = 3;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -104,9 +116,27 @@ async function call<T>(method: string, body: Record<string, unknown>): Promise<T
   const data = (await res.json()) as TelegramResponse<T>;
   if (!res.ok || !data.ok) {
     logger.error('telegram api error', { method, status: res.status, description: data.description });
-    throw new Error(`Telegram ${method} falló: ${data.description ?? res.status}`);
+    throw new TelegramApiError(method, res.status, data.description ?? String(res.status));
   }
   return data.result;
+}
+
+/** Tags que Telegram entiende en parse_mode: "HTML". */
+const TELEGRAM_TAGS = 'b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|code|pre|blockquote';
+const PARSE_ENTITIES_ERROR = /can't parse entities/i;
+
+/**
+ * Degrada el HTML a texto plano legible: quita el marcado que Telegram acepta
+ * y devuelve las entidades a su carácter. Un "<monto>" mal escapado sobrevive
+ * tal cual, que es justo lo que el mensaje quería mostrar.
+ */
+function toPlainText(html: string): string {
+  return html
+    .replace(/<a\s[^>]*>([\s\S]*?)<\/a>/gi, '$1')
+    .replace(new RegExp(`</?(?:${TELEGRAM_TAGS})(?:\\s[^>]*)?>`, 'gi'), '')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&');
 }
 
 export async function sendMessage(
@@ -114,12 +144,20 @@ export async function sendMessage(
   html: string,
   opts?: { keyboard?: InlineKeyboardButton[][] },
 ): Promise<void> {
-  await call('sendMessage', {
+  const body = {
     chat_id: chatId,
-    text: html,
-    parse_mode: 'HTML',
     ...(opts?.keyboard ? { reply_markup: { inline_keyboard: opts.keyboard } } : {}),
-  });
+  };
+  try {
+    await call('sendMessage', { ...body, text: html, parse_mode: 'HTML' });
+  } catch (err) {
+    // Un solo tag mal formado NO puede costar el mensaje entero: perder el
+    // marcado es cosmético, perder el aviso es el incidente 29/30-jul (dos días
+    // sin guardián por un "<monto>" literal). Reenvía en texto plano.
+    if (!(err instanceof TelegramApiError) || !PARSE_ENTITIES_ERROR.test(err.description)) throw err;
+    logger.error('html inválido: reenviando en texto plano', { description: err.description });
+    await call('sendMessage', { ...body, text: toPlainText(html) });
+  }
 }
 
 /** Muestra "escribiendo..." mientras el agente piensa (efímero, ~5s). */
@@ -153,7 +191,7 @@ export async function sendDocument(
   const data = (await res.json()) as TelegramResponse<unknown>;
   if (!res.ok || !data.ok) {
     logger.error('telegram api error', { method: 'sendDocument', status: res.status, description: data.description });
-    throw new Error(`Telegram sendDocument falló: ${data.description ?? res.status}`);
+    throw new TelegramApiError('sendDocument', res.status, data.description ?? String(res.status));
   }
 }
 

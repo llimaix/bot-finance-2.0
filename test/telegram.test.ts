@@ -46,3 +46,55 @@ describe('reintentos de Telegram (incidente 15-jul: "fetch failed" tiró una res
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('fallback a texto plano (incidente 29/30-jul: un "<monto>" literal borró el guardián dos días)', () => {
+  const parseError = () =>
+    new Response(
+      JSON.stringify({
+        ok: false,
+        description: `Bad Request: can't parse entities: Unsupported start tag "monto" at byte offset 170`,
+      }),
+      { status: 400 },
+    );
+
+  const bodyOf = (call: number) => {
+    const init = fetchMock.mock.calls[call]?.[1] as RequestInit | undefined;
+    return JSON.parse(String(init?.body));
+  };
+
+  it('HTML inválido: el mensaje SALE en texto plano en vez de perderse', async () => {
+    fetchMock.mockResolvedValueOnce(parseError()).mockResolvedValueOnce(ok());
+    await expect(
+      sendMessage(1, '🛡️ <b>Guardián</b>\n\nAjusta con /saldo efectivo <monto>.'),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retry = bodyOf(1);
+    expect(retry.parse_mode).toBeUndefined();
+    expect(retry.text).toBe('🛡️ Guardián\n\nAjusta con /saldo efectivo <monto>.');
+  });
+
+  it('el fallback conserva el teclado inline', async () => {
+    fetchMock.mockResolvedValueOnce(parseError()).mockResolvedValueOnce(ok());
+    const keyboard = [[{ text: 'Sí', callback_data: 'bgt:y:comida:500' }]];
+    await sendMessage(1, 'roto <monto>', { keyboard });
+    expect(bodyOf(1).reply_markup).toEqual({ inline_keyboard: keyboard });
+  });
+
+  it('des-escapa entidades al degradar (&amp;lt; vuelve a ser "<")', async () => {
+    fetchMock.mockResolvedValueOnce(parseError()).mockResolvedValueOnce(ok());
+    await sendMessage(1, '<code>/saldo &lt;monto&gt;</code> &amp; ya');
+    expect(bodyOf(1).text).toBe('/saldo <monto> & ya');
+  });
+
+  it('un 400 que NO es de parseo se propaga (no enmascara otros fallos)', async () => {
+    fetchMock.mockResolvedValue(status(400));
+    await expect(sendMessage(1, 'hola')).rejects.toThrow('err 400');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('si el reenvío plano también falla, el error sube', async () => {
+    fetchMock.mockResolvedValueOnce(parseError()).mockResolvedValueOnce(status(403));
+    await expect(sendMessage(1, 'roto <monto>')).rejects.toThrow('err 403');
+  });
+});
