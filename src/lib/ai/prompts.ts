@@ -14,6 +14,13 @@ Reglas de categorías:
 - Solo si NINGUNA del catálogo encaja, crea una nueva: en minúsculas, sin tildes, 1 o 2 palabras unidas por guion (ej. "mascotas", "cuidado-personal"). NO crees sinónimos ni variantes de categorías existentes.
 - Toda categoría nueva que uses en "transactions" debes declararla también en "newCategories" con un emoji representativo: [{"name":"mascotas","emoji":"🐕"}].
 
+Regla de TIPO (campo "type") — el signo del saldo depende de esto, no te guíes solo por la palabra que use Allan:
+- ingreso: dinero NUEVO que entra de fuera (salario, planilla, bono, aguinaldo, pago de un cliente, reembolso, alguien le transfirió). OJO: en Guatemala a esto se le dice "depósito" ("me depositaron la planilla", "entró un depósito a BI", boleta de depósito). Si el dinero VIENE DE FUERA es ingreso, aunque la palabra sea "depósito".
+- deposito: SOLO mover dinero PROPIO de su efectivo hacia una cuenta ("deposité Q500 de mi efectivo al banco", "fui a depositar los billetes que tenía"). Es el inverso exacto del retiro. Si Allan no tenía ya ese efectivo en la mano, NO es deposito: es ingreso.
+- retiro: sacar de una cuenta y quedarse el efectivo (cajero, adelanto con tarjeta).
+- transferencia: mover dinero entre cuentas propias (banco → Kash, o pago de tarjeta con category deuda).
+- gasto: dinero que sale y no vuelve.
+
 Regla de fecha (campo "date" de cada transacción):
 - null cuando el movimiento es de hoy o no se indica cuándo ocurrió.
 - Si se indica ("ayer", "el lunes", "el 5 de julio", o la fecha impresa en un comprobante), pon la fecha exacta en formato yyyy-mm-dd. Nunca fechas futuras.
@@ -37,7 +44,7 @@ ${COMMON_RULES(ctx)}
 Reglas:
 - Los montos están en quetzales (Q). "Q45", "45 quetzales", "45 varas" = 45.
 - "la de crédito", "la tarjeta" sin más contexto = credito. "la de débito" = debito.
-- Depósitos a ahorro → type: deposito, category: ahorro. Retiros de cajero → type: retiro, method: debito.
+- Retiros de cajero → type: retiro, method: debito. Ver la "Regla de TIPO" para depósitos: "me depositaron" es ingreso, no deposito.
 - Pago/abono a la tarjeta de crédito ("pagué la tarjeta", "cancelé la tarjeta") → type: transferencia, category: deuda, method: debito. NUNCA gasto (un gasto no baja la deuda). Intereses/comisiones de tarjeta SÍ son gasto.
 - Si el mensaje dice que no hubo movimientos ("hoy nada", "sin gastos"), devuelve transactions vacío y noMovements=true.
 - Si un movimiento es ambiguo en el MONTO (no se entiende la cifra), no lo inventes: omítelo y pon en "clarification" una pregunta corta en español para el usuario. La ambigüedad en categoría NO amerita pregunta: usa tu mejor criterio.
@@ -65,9 +72,10 @@ En imágenes, "question" y "noMovements" son siempre null/false.
 ${COMMON_RULES(ctx)}
 
 Reglas para comprobantes:
-- Registra UN movimiento por comprobante, con el TOTAL FINAL (incluye impuestos y propina si están en el total). NO registres cada línea del ticket.
-- description: el nombre del comercio (ej. "La Torre", "Shell zona 12"); si no es legible, el concepto general.
-- category: según el giro del comercio (supermercado, gasolinera→transporte, farmacia→salud, restaurante→comida, etc.).
+- Registra UN movimiento por comprobante, con el TOTAL FINAL (incluye impuestos y propina si están en el total). NO registres cada línea del ticket. EXCEPCIÓN: si la imagen es un estado de cuenta o muestra VARIAS operaciones distintas (p.ej. dos depósitos), registra una por cada operación.
+- NO todo comprobante es un gasto. Boletas de depósito, avisos de acreditamiento, comprobantes de transferencia recibida y estados de cuenta que muestran dinero ENTRANDO son type: ingreso (ver la "Regla de TIPO"). Un comprobante de planilla, bono o salario NUNCA es gasto.
+- description: el nombre del comercio (ej. "La Torre", "Shell zona 12"); si no es legible, el concepto general. Para dinero que entra, el concepto ("Planilla", "Bono", "Reembolso").
+- category: según el giro del comercio (supermercado, gasolinera→transporte, farmacia→salud, restaurante→comida, etc.). Para dinero que entra, la categoría del origen (salario/planilla/bono → "salario" si está en el catálogo), nunca "otros" por defecto.
 - method: el contexto del usuario MANDA siempre ("con la tarjeta de BI", "con débito", "de mi cuenta" → debito; "con la de crédito" → credito). Sin contexto: pagos/transferencias desde app bancaria (BI, Banrural, banca en línea) → debito; voucher de POS que diga explícitamente crédito → credito; efectivo evidente → efectivo. Si el comprobante no permite saber la cuenta (dice "débito/crédito" sin especificar), usa "na" — el sistema le preguntará a Allan de qué cuenta salió y la aplicará. NUNCA omitas el movimiento del comprobante por no saber la cuenta: se perdería. OJO: "tarjeta de BI" es la de DÉBITO.
 - date: la fecha impresa en el comprobante si es legible (yyyy-mm-dd); si no, null.
 - Si el TOTAL no es legible, NO lo inventes: transactions vacío y en "clarification" pregunta el monto.

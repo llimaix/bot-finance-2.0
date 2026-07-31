@@ -57,6 +57,31 @@ describe('accountDelta', () => {
     expect(accountDelta(adelantoTC, 'efectivo')).toBe(300);
   });
 
+  // El tipo `deposito` no tenía NI UN test y no se había usado en producción
+  // desde abril. Se estrenó el 31-jul con la planilla y un bono, y los restó:
+  // BI pasó de Q728.89 a Q-6,335.90. Es el inverso exacto del retiro.
+  it('depósito ENTRA a la cuenta, no sale (incidente 31-jul: planilla restada de BI)', () => {
+    const planilla = txn({ type: 'deposito', method: 'debito', amount: 6294.79 });
+    expect(accountDelta(planilla, 'banco')).toBe(6294.79);
+    expect(accountDelta(planilla, 'efectivo')).toBe(0);
+  });
+
+  it('depósito en efectivo: sale del efectivo y entra al banco (no se evapora)', () => {
+    const billetes = txn({ type: 'deposito', method: 'efectivo', amount: 500 });
+    expect(accountDelta(billetes, 'efectivo')).toBe(-500);
+    expect(accountDelta(billetes, 'banco')).toBe(500);
+    // El neto no cambia: es dinero movido de bolsillo a cuenta, no dinero nuevo.
+    expect(accountDelta(billetes, 'efectivo') + accountDelta(billetes, 'banco')).toBe(0);
+  });
+
+  it('retiro y depósito son simétricos: uno deshace al otro', () => {
+    const saca = txn({ type: 'retiro', method: 'debito', amount: 300 });
+    const mete = txn({ type: 'deposito', method: 'efectivo', amount: 300 });
+    for (const cuenta of ['banco', 'efectivo'] as const) {
+      expect(accountDelta(saca, cuenta) + accountDelta(mete, cuenta)).toBe(0);
+    }
+  });
+
   it('gasto en efectivo baja el efectivo, no el banco', () => {
     const cash = txn({ method: 'efectivo', amount: 45 });
     expect(accountDelta(cash, 'efectivo')).toBe(-45);
@@ -101,6 +126,17 @@ describe('computeBalances', () => {
     const [banco] = computeBalances(accounts, txns);
     expect(banco!.balance).toBe(4051.01);
     expect(banco!.movements).toBe(2);
+  });
+
+  // Reproducción exacta del incidente 31-jul con los montos reales.
+  it('planilla y bono depositados SUBEN el saldo de BI', () => {
+    const accounts = [account('banco', 728.89, '2026-07-30')];
+    const txns = [
+      txn({ date: '2026-07-31', type: 'deposito', method: 'debito', amount: 770 }),
+      txn({ date: '2026-07-31', type: 'deposito', method: 'debito', amount: 6294.79 }),
+    ];
+    const [banco] = computeBalances(accounts, txns);
+    expect(banco!.balance).toBe(7793.68); // antes daba -6335.90
   });
 
   it('la deuda de tarjeta baja con pagos y sube con compras', () => {
