@@ -17,9 +17,10 @@ export const DEFAULT_ACCOUNTS: Array<Pick<Account, 'id' | 'name' | 'emoji'>> = [
  * - Los ingresos (salarios, bonos) entran al banco.
  * - method=debito sale del banco; method=credito sube la deuda de la tarjeta.
  * - Los retiros (débito o crédito) convierten a efectivo.
+ * - Los depósitos son el INVERSO del retiro: entran a la cuenta, y si son en
+ *   efectivo salen del efectivo (billetes que llevas al banco).
  * - transferencia+method transferencia = banco → Kash.
  * - transferencia categoría deuda con débito = pago de tarjeta (banco → tarjeta).
- * - Depósitos (p.ej. a ahorro) salen del banco salvo que sean en efectivo.
  */
 export function accountDelta(txn: Transaction, account: AccountId): number {
   const a = txn.amount;
@@ -28,10 +29,14 @@ export function accountDelta(txn: Transaction, account: AccountId): number {
       // Ingresos NO en efectivo entran al banco; un ingreso en efectivo ya lo
       // suma la cuenta efectivo (contarlo aquí también lo duplicaba en el neto).
       if (txn.type === 'ingreso' && txn.method !== 'efectivo') return a;
+      // Depósito = ENTRA a la cuenta (par simétrico del retiro). Va ANTES de la
+      // regla de débito: si no, un depósito con method=debito se resta —
+      // incidente 31-jul, Q7,064.79 de planilla y bono restados de BI en vez
+      // de sumados, dejando la cuenta en Q-6,335.90.
+      if (txn.type === 'deposito') return a;
       if (txn.method === 'debito') return -a;
       // Sale del banco: transferencia a Kash o pago de tarjeta (categoría deuda).
       if (txn.type === 'transferencia' && (txn.method === 'transferencia' || txn.category === 'deuda')) return -a;
-      if (txn.type === 'deposito' && txn.method !== 'efectivo') return -a;
       return 0;
 
     case 'banrural':
