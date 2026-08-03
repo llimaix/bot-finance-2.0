@@ -7,7 +7,7 @@ import { DEFAULT_ACCOUNTS, renderSaldos } from './accounts';
 import { renderMetas, suggestBudgets } from './budgets';
 import { resolveCategory } from './categories';
 import { computeAggregates } from './aggregates';
-import { registrationWarnings } from './guards';
+import { enforceStatedMethod, registrationWarnings } from './guards';
 import { loadAdvisorData, loadBalancesReadonly, renderProjection } from './insights';
 import { detectRecurring, findNewCandidates, normalizeDesc } from './recurring';
 import { summarizeSearch } from './search';
@@ -649,9 +649,17 @@ async function persistOutcome(
     await putCategoryIfAbsent({ ...cat, source: 'auto', createdAt });
   }
 
+  // Si Allan NOMBRÓ la cuenta, el método no se negocia con el modelo: pasa por
+  // aquí todo lo que se registra (texto, voz, foto y agente), así que la regla
+  // no puede quedarse fuera de una ruta como pasó con los prompts.
+  const { txns: parsed, corrections } = enforceStatedMethod(outcome.transactions, rawMessage);
+  if (corrections.length > 0) {
+    logger.info('método corregido por lo que dice el mensaje', { rawMessage, corrections });
+  }
+
   // Agrupar por fecha efectiva: los shortIds son por día ("ayer gasté..." reserva en ayer).
   const byDate = new Map<string, typeof outcome.transactions>();
-  for (const t of outcome.transactions) {
+  for (const t of parsed) {
     const group = byDate.get(t.date) ?? [];
     group.push(t);
     byDate.set(t.date, group);

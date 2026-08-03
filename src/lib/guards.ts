@@ -1,5 +1,56 @@
 import { formatQ } from './format';
-import type { Transaction } from './types';
+import type { Method, Transaction } from './types';
+
+/**
+ * La cuenta que el mensaje nombra sin lugar a dudas. El prompt ya lo explica,
+ * pero un prompt es una probabilidad: "tarjeta BI" —la misma frase, escrita
+ * igual— salió credito 2 de 4 veces y debito las otras 2, según qué ruta
+ * atendiera el mensaje (incidente 31-jul/2-ago). Cuando Allan NOMBRA la
+ * cuenta, el método deja de ser opinión del modelo.
+ *
+ * Devuelve null si el texto no nombra ninguna cuenta o si nombra VARIAS: en
+ * "retiré 1000 de BI y pasan a efectivo" hay dos señales legítimas y solo el
+ * modelo, que ve cada movimiento por separado, puede repartirlas.
+ */
+const ACCOUNT_SIGNALS: ReadonlyArray<{ re: RegExp; method: Method }> = [
+  // La tarjeta del BI es de DÉBITO: es la trampa que originó el incidente.
+  { re: /\b(bi|banco industrial)\b/, method: 'debito' },
+  { re: /\bbac\b/, method: 'credito' },
+  { re: /\bcredito\b|\btarjeta de credito\b/, method: 'credito' },
+  { re: /\bbanrural\b/, method: 'debito' },
+  { re: /\bkash\b/, method: 'transferencia' },
+  { re: /\befectivo\b|\bbilletes\b/, method: 'efectivo' },
+];
+
+export function statedMethod(text: string): Method | null {
+  const t = text
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase();
+  const hits = new Set(ACCOUNT_SIGNALS.filter((s) => s.re.test(t)).map((s) => s.method));
+  return hits.size === 1 ? [...hits][0]! : null;
+}
+
+/**
+ * Impone el método que el mensaje dice, por encima del que eligió el modelo.
+ * Devuelve los movimientos corregidos y una nota por cada cambio: corregir un
+ * saldo en silencio es peor que no corregirlo, porque Allan no puede auditarlo.
+ */
+export function enforceStatedMethod<T extends { method: Method; description: string }>(
+  txns: ReadonlyArray<T>,
+  text: string,
+): { txns: T[]; corrections: string[] } {
+  const stated = statedMethod(text);
+  if (!stated) return { txns: [...txns], corrections: [] };
+
+  const corrections: string[] = [];
+  const fixed = txns.map((t) => {
+    if (t.method === stated) return t;
+    corrections.push(`«${t.description}»: ${t.method} → ${stated}`);
+    return { ...t, method: stated };
+  });
+  return { txns: fixed, corrections };
+}
 
 /** Aviso de montos inusualmente grandes (posible dedazo o mala transcripción). */
 const BIG_AMOUNT_THRESHOLD = 10_000;

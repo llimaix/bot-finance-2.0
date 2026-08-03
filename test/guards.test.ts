@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { registrationWarnings } from '../src/lib/guards';
+import { enforceStatedMethod, registrationWarnings, statedMethod } from '../src/lib/guards';
 import type { Transaction } from '../src/lib/types';
 
 let n = 0;
@@ -96,5 +96,70 @@ describe('registrationWarnings', () => {
     // "cerveza compartir novia" vs "cena novia": similitud baja → sin aviso
     const warnings = registrationWarnings([cena], [cerveza, cena]);
     expect(warnings).toHaveLength(0);
+  });
+});
+
+/**
+ * Frases REALES del chat de Allan. "tarjeta BI" y "tarjeta bi" son la misma
+ * cosa y salieron credito dos veces y debito otras dos, según qué ruta
+ * atendiera el mensaje. Un prompt no puede garantizar esto: el código sí.
+ */
+describe('statedMethod: la cuenta que el mensaje NOMBRA manda', () => {
+  it.each([
+    ['Registra un gasto en tarjeta bi 174 por cerveza', 'debito'],
+    ['Se realizó un pago con la tarjeta BI esto por impuesto de factura sat', 'debito'],
+    ['Otro gasto por combustible 540 quetzales pago con tarjeta BI', 'debito'],
+    ['Otro gasto con tarjeta bi 134 pan para cena con suegros', 'debito'],
+    ['gasto en Banco Industrial de 200', 'debito'],
+    ['Se realizó este pago con la tarjeta de crédito', 'credito'],
+    ['pagué con la BAC 300', 'credito'],
+    ['Pago en efectivo desayuno con mi novia 100 quetzales', 'efectivo'],
+    ['transferí 500 a Kash', 'transferencia'],
+  ])('%s → %s', (text, expected) => {
+    expect(statedMethod(text)).toBe(expected);
+  });
+
+  it('mayúsculas, minúsculas y tildes dan el MISMO resultado', () => {
+    const variantes = ['tarjeta BI', 'tarjeta bi', 'Tarjeta Bi', 'tarjeta de BI'];
+    const metodos = new Set(variantes.map(statedMethod));
+    expect(metodos).toEqual(new Set(['debito']));
+  });
+
+  it('varias cuentas en un mensaje: no decide (el modelo ve cada movimiento)', () => {
+    // Caso real: un retiro legítimo menciona la cuenta origen Y el efectivo.
+    expect(statedMethod('Se retiró 1000 quetzales de la cuenta BI ahora pasan hacer efectivo')).toBeNull();
+  });
+
+  it('sin cuenta nombrada: no inventa', () => {
+    expect(statedMethod('gasté 45 en almuerzo')).toBeNull();
+  });
+
+  it('no confunde palabras que contienen "bi" ni "bac"', () => {
+    expect(statedMethod('compré una bicicleta de 900')).toBeNull();
+    expect(statedMethod('pagué el bachillerato')).toBeNull();
+  });
+});
+
+describe('enforceStatedMethod: corrige al modelo y deja constancia', () => {
+  it('el combustible de "tarjeta BI" deja de irse a la tarjeta de crédito', () => {
+    const mal = [txn({ method: 'credito', description: 'Combustible pagado con tarjeta BI', amount: 540 })];
+    const { txns, corrections } = enforceStatedMethod(mal, 'Otro gasto por combustible 540 quetzales pago con tarjeta BI');
+    expect(txns[0]!.method).toBe('debito');
+    expect(corrections).toHaveLength(1);
+    expect(corrections[0]).toContain('credito → debito');
+  });
+
+  it('si el modelo ya acertó, no toca nada ni genera ruido', () => {
+    const bien = [txn({ method: 'debito', description: 'Cerveza' })];
+    const { txns, corrections } = enforceStatedMethod(bien, 'Registra un gasto en tarjeta bi 174 por cerveza');
+    expect(txns[0]!.method).toBe('debito');
+    expect(corrections).toEqual([]);
+  });
+
+  it('mensaje ambiguo: respeta lo que decidió el modelo por movimiento', () => {
+    const retiro = [txn({ method: 'debito', type: 'retiro', description: 'Retiro de BI' })];
+    const { txns, corrections } = enforceStatedMethod(retiro, 'Se retiró 1000 de la cuenta BI ahora pasan hacer efectivo');
+    expect(txns[0]!.method).toBe('debito');
+    expect(corrections).toEqual([]);
   });
 });
