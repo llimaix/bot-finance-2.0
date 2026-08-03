@@ -6,6 +6,31 @@ export interface PromptContext {
   weekday: string;
 }
 
+/**
+ * Reglas que deciden la CUENTA y el SIGNO de cada movimiento. Es una constante
+ * (no depende de ctx) a propósito: tiene que llegar a las CUATRO rutas que
+ * clasifican — texto, foto, agente y corrección — y el prompt del agente no
+ * recibe el catálogo de categorías, así que no puede reusar COMMON_RULES.
+ *
+ * Vivían duplicadas y divergentes: «"tarjeta de BI" es la de DÉBITO» existía
+ * SOLO en el prompt de fotos, mientras texto y agente decían «"la tarjeta" =
+ * credito». La misma frase "gasto con tarjeta BI" salía débito o crédito según
+ * qué ruta la atendiera — 2 de 4 veces cada una (incidente 31-jul/2-ago:
+ * Q540 de combustible cargados a la BAC en vez de descontados de BI).
+ */
+const CLASSIFICATION_RULES = `Regla de CUENTAS (Allan solo tiene estas) — de esto depende de qué cuenta sale el dinero:
+- "BI", "Banco Industrial", "tarjeta BI", "tarjeta de BI", "mi cuenta": es su cuenta de BANCO → method: debito. OJO: la tarjeta del BI es de DÉBITO aunque Allan la llame "tarjeta".
+- "BAC", "tarjeta BAC", "la de crédito", o "la tarjeta" a secas SIN nombrar banco: es su TARJETA DE CRÉDITO → method: credito.
+- "Banrural" → method: debito. "Kash" → method: transferencia. Billetes o "en efectivo" → method: efectivo.
+- Si el mensaje no permite saber la cuenta, usa method "na" — el sistema le pregunta a Allan y la aplica. NUNCA adivines entre debito y credito: acertar por azar descuadra dos saldos a la vez (el banco y la tarjeta).
+
+Regla de TIPO (campo "type") — el signo del saldo depende de esto, no te guíes solo por la palabra que use Allan:
+- ingreso: dinero NUEVO que entra de fuera (salario, planilla, bono, aguinaldo, pago de un cliente, reembolso, alguien le transfirió). OJO: en Guatemala a esto se le dice "depósito" ("me depositaron la planilla", "entró un depósito a BI", boleta de depósito). Si el dinero VIENE DE FUERA es ingreso, aunque la palabra sea "depósito".
+- deposito: SOLO mover dinero PROPIO de su efectivo hacia una cuenta ("deposité Q500 de mi efectivo al banco", "fui a depositar los billetes que tenía"). Es el inverso exacto del retiro. Si Allan no tenía ya ese efectivo en la mano, NO es deposito: es ingreso.
+- retiro: sacar de una cuenta y quedarse el efectivo (cajero, adelanto con tarjeta).
+- transferencia: mover dinero entre cuentas propias (banco → Kash, o pago de tarjeta con category deuda).
+- gasto: dinero que sale y no vuelve.`;
+
 const COMMON_RULES = (ctx: PromptContext) => `Catálogo ACTUAL de categorías: ${ctx.categories.join(', ')}.
 HOY es ${ctx.weekday} ${ctx.today} (zona America/Guatemala).
 
@@ -14,12 +39,7 @@ Reglas de categorías:
 - Solo si NINGUNA del catálogo encaja, crea una nueva: en minúsculas, sin tildes, 1 o 2 palabras unidas por guion (ej. "mascotas", "cuidado-personal"). NO crees sinónimos ni variantes de categorías existentes.
 - Toda categoría nueva que uses en "transactions" debes declararla también en "newCategories" con un emoji representativo: [{"name":"mascotas","emoji":"🐕"}].
 
-Regla de TIPO (campo "type") — el signo del saldo depende de esto, no te guíes solo por la palabra que use Allan:
-- ingreso: dinero NUEVO que entra de fuera (salario, planilla, bono, aguinaldo, pago de un cliente, reembolso, alguien le transfirió). OJO: en Guatemala a esto se le dice "depósito" ("me depositaron la planilla", "entró un depósito a BI", boleta de depósito). Si el dinero VIENE DE FUERA es ingreso, aunque la palabra sea "depósito".
-- deposito: SOLO mover dinero PROPIO de su efectivo hacia una cuenta ("deposité Q500 de mi efectivo al banco", "fui a depositar los billetes que tenía"). Es el inverso exacto del retiro. Si Allan no tenía ya ese efectivo en la mano, NO es deposito: es ingreso.
-- retiro: sacar de una cuenta y quedarse el efectivo (cajero, adelanto con tarjeta).
-- transferencia: mover dinero entre cuentas propias (banco → Kash, o pago de tarjeta con category deuda).
-- gasto: dinero que sale y no vuelve.
+${CLASSIFICATION_RULES}
 
 Regla de fecha (campo "date" de cada transacción):
 - null cuando el movimiento es de hoy o no se indica cuándo ocurrió.
@@ -43,7 +63,7 @@ ${COMMON_RULES(ctx)}
 
 Reglas:
 - Los montos están en quetzales (Q). "Q45", "45 quetzales", "45 varas" = 45.
-- "la de crédito", "la tarjeta" sin más contexto = credito. "la de débito" = debito.
+- El método sale de la "Regla de CUENTAS" de arriba; no la contradigas ("tarjeta BI" es débito).
 - Retiros de cajero → type: retiro, method: debito. Ver la "Regla de TIPO" para depósitos: "me depositaron" es ingreso, no deposito.
 - Pago/abono a la tarjeta de crédito ("pagué la tarjeta", "cancelé la tarjeta") → type: transferencia, category: deuda, method: debito. NUNCA gasto (un gasto no baja la deuda). Intereses/comisiones de tarjeta SÍ son gasto.
 - Si el mensaje dice que no hubo movimientos ("hoy nada", "sin gastos"), devuelve transactions vacío y noMovements=true.
@@ -76,7 +96,7 @@ Reglas para comprobantes:
 - NO todo comprobante es un gasto. Boletas de depósito, avisos de acreditamiento, comprobantes de transferencia recibida y estados de cuenta que muestran dinero ENTRANDO son type: ingreso (ver la "Regla de TIPO"). Un comprobante de planilla, bono o salario NUNCA es gasto.
 - description: el nombre del comercio (ej. "La Torre", "Shell zona 12"); si no es legible, el concepto general. Para dinero que entra, el concepto ("Planilla", "Bono", "Reembolso").
 - category: según el giro del comercio (supermercado, gasolinera→transporte, farmacia→salud, restaurante→comida, etc.). Para dinero que entra, la categoría del origen (salario/planilla/bono → "salario" si está en el catálogo), nunca "otros" por defecto.
-- method: el contexto del usuario MANDA siempre ("con la tarjeta de BI", "con débito", "de mi cuenta" → debito; "con la de crédito" → credito). Sin contexto: pagos/transferencias desde app bancaria (BI, Banrural, banca en línea) → debito; voucher de POS que diga explícitamente crédito → credito; efectivo evidente → efectivo. Si el comprobante no permite saber la cuenta (dice "débito/crédito" sin especificar), usa "na" — el sistema le preguntará a Allan de qué cuenta salió y la aplicará. NUNCA omitas el movimiento del comprobante por no saber la cuenta: se perdería. OJO: "tarjeta de BI" es la de DÉBITO.
+- method: el contexto que escribe Allan MANDA siempre, y se resuelve con la "Regla de CUENTAS" de arriba. Sin contexto: pagos/transferencias desde app bancaria (BI, Banrural, banca en línea) → debito; voucher de POS que diga explícitamente crédito → credito; efectivo evidente → efectivo. Si el comprobante no permite saber la cuenta (dice "débito/crédito" sin especificar), usa "na" — el sistema le preguntará a Allan de qué cuenta salió y la aplicará. NUNCA omitas el movimiento del comprobante por no saber la cuenta: se perdería.
 - date: la fecha impresa en el comprobante si es legible (yyyy-mm-dd); si no, null.
 - Si el TOTAL no es legible, NO lo inventes: transactions vacío y en "clarification" pregunta el monto.
 - Si la imagen no es un comprobante financiero, transactions vacío, noMovements=false y en "clarification" explica brevemente qué ves y pide el dato.
@@ -90,7 +110,9 @@ Entrega la transacción CORREGIDA llamando SIEMPRE (exactamente una vez) a la he
 
 Campo "currency": "GTQ" SIEMPRE, salvo que la corrección misma diga que el monto está/estaba en dólares ("el monto es en dólares", "eran $20"): entonces "USD" con amount en DÓLARES — el sistema lo convierte a quetzales, no conviertas tú. Si la descripción ya contiene una conversión "(USD ... ≈ Q...)" y la corrección no habla de moneda, devuelve "GTQ" con el monto en quetzales tal cual.
 
-HOY es ${ctx.weekday} ${ctx.today}. Catálogo ACTUAL de categorías: ${ctx.categories.join(', ')}. Usa una del catálogo si razonablemente aplica; solo si la corrección exige una categoría que no existe, créala en minúsculas, sin tildes, 1 o 2 palabras unidas por guion.`;
+HOY es ${ctx.weekday} ${ctx.today}. Catálogo ACTUAL de categorías: ${ctx.categories.join(', ')}. Usa una del catálogo si razonablemente aplica; solo si la corrección exige una categoría que no existe, créala en minúsculas, sin tildes, 1 o 2 palabras unidas por guion.
+
+${CLASSIFICATION_RULES}`;
 }
 
 export interface AgentPromptContext {
@@ -107,8 +129,10 @@ export function buildAgentSystemPrompt(ctx: AgentPromptContext): string {
 HOY es ${ctx.weekday} ${ctx.today} (zona America/Guatemala).
 ${ctx.contextInfo}
 
+${CLASSIFICATION_RULES}
+
 Tus herramientas y cuándo usarlas:
-- registrar_movimientos: cuando el mensaje describa movimientos de dinero NUEVOS (gastos, ingresos, retiros, depósitos, transferencias) que no estén ya registrados — si Allan está cuadrando o re-explicando algo que ya existe, NO la uses (ver "Registrar vs. reconciliar"). Si Allan no dijo de qué cuenta salió un gasto/retiro y no puedes deducirlo, regístralo IGUAL con method "na" (no adivines la cuenta) — el sistema le preguntará de qué cuenta salió y la aplicará. NUNCA dejes de registrar un gasto que ocurrió por no saber la cuenta: se perdería. Montos en Q ("45 varas" = Q45). "la tarjeta"/"la de crédito" = method credito; "la de débito" = debito. Fechas: si dice cuándo ocurrió ("ayer", "el lunes", "el 5 de julio"), pon yyyy-mm-dd en date; si no, null (= hoy). Moneda: currency "GTQ" salvo pagos explícitos en dólares (suscripciones internacionales: Anthropic, Apple...) → "USD" con el monto en dólares tal cual; el sistema convierte a Q, no conviertas tú. Categorías: usa una del catálogo si aplica; solo si ninguna encaja crea una nueva (minúsculas, sin tildes, 1-2 palabras con guion) y decláralas en newCategories con emoji. NUNCA inventes movimientos ni montos: si el monto es ambiguo, pregunta en vez de registrar.
+- registrar_movimientos: cuando el mensaje describa movimientos de dinero NUEVOS (gastos, ingresos, retiros, depósitos, transferencias) que no estén ya registrados — si Allan está cuadrando o re-explicando algo que ya existe, NO la uses (ver "Registrar vs. reconciliar"). Si Allan no dijo de qué cuenta salió un gasto/retiro y no puedes deducirlo, regístralo IGUAL con method "na" (no adivines la cuenta) — el sistema le preguntará de qué cuenta salió y la aplicará. NUNCA dejes de registrar un gasto que ocurrió por no saber la cuenta: se perdería. Montos en Q ("45 varas" = Q45). El method y el type salen de las "Regla de CUENTAS" y "Regla de TIPO" de arriba; no las contradigas ("tarjeta BI" es débito). Fechas: si dice cuándo ocurrió ("ayer", "el lunes", "el 5 de julio"), pon yyyy-mm-dd en date; si no, null (= hoy). Moneda: currency "GTQ" salvo pagos explícitos en dólares (suscripciones internacionales: Anthropic, Apple...) → "USD" con el monto en dólares tal cual; el sistema convierte a Q, no conviertas tú. Categorías: usa una del catálogo si aplica; solo si ninguna encaja crea una nueva (minúsculas, sin tildes, 1-2 palabras con guion) y decláralas en newCategories con emoji. NUNCA inventes movimientos ni montos: si el monto es ambiguo, pregunta en vez de registrar.
 - consultar_datos: SIEMPRE antes de responder preguntas sobre su situación o dar veredictos ("¿cuánto tengo?", "¿me alcanza para X?"). Devuelve saldos, neto, recurrentes (gastos e ingresos, con si aún vienen este mes), la proyeccionFinDeMes YA CALCULADA (disponibleProyectadoFinDeMes = neto + ingresos confirmados restantes − compromisos pendientes − gasto variable proyectado) y agregados. Para veredictos de compra usa disponibleProyectadoFinDeMes como referencia principal, no solo el neto de hoy.
 - ajustar_cuenta: cuando Allan corrige un dato de sus cuentas ("en banrural solo tengo 40", "el nombre es Banco Industrial", "cargo Q300 en efectivo"). La deuda de tarjeta va en negativo.
 - dia_sin_movimientos: cuando diga explícitamente que hoy no hubo movimientos ("hoy nada", "hoy no hubieron movimientos"). Mira la sección "Movimientos registrados HOY" del contexto: si dice NINGUNO, márcala DIRECTO sin pedir confirmación. Los de la sección AYER NO cuentan como de hoy — NUNCA los menciones como si fueran de hoy ni contradigas a Allan por ellos. Solo pregunta si la sección HOY sí tiene movimientos que contradigan su "hoy nada".
