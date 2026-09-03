@@ -20,7 +20,8 @@ export const DEFAULT_ACCOUNTS: Array<Pick<Account, 'id' | 'name' | 'emoji'>> = [
  * - Los depósitos son el INVERSO del retiro: entran a la cuenta, y si son en
  *   efectivo salen del efectivo (billetes que llevas al banco).
  * - transferencia+method transferencia = banco → Kash.
- * - transferencia categoría deuda con débito = pago de tarjeta (banco → tarjeta).
+ * - transferencia categoría deuda = pago de tarjeta (banco → tarjeta), con el
+ *   método que venga: un pago NUNCA sube la deuda.
  */
 export function accountDelta(txn: Transaction, account: AccountId): number {
   const a = txn.amount;
@@ -45,10 +46,12 @@ export function accountDelta(txn: Transaction, account: AccountId): number {
       return 0;
 
     case 'tarjeta':
-      if (txn.method === 'credito') return -a;
-      // Pago de tarjeta (baja la deuda): transferencia categoría deuda, sea el
-      // método débito o transferencia — antes solo débito y el resto iba a Kash.
+      // Pago de tarjeta (BAJA la deuda): transferencia categoría deuda, con el
+      // método que venga. Va ANTES de la regla de crédito: si no, un pago que
+      // llega etiquetado credito SUBE la deuda — incidente 3-sep, los
+      // Q4,831.78 del cierre BAC sumados en vez de restados.
       if (txn.type === 'transferencia' && txn.category === 'deuda') return a;
+      if (txn.method === 'credito') return -a;
       return 0;
 
     case 'efectivo':

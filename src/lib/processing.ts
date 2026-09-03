@@ -7,7 +7,7 @@ import { DEFAULT_ACCOUNTS, renderSaldos } from './accounts';
 import { renderMetas, suggestBudgets } from './budgets';
 import { resolveCategory } from './categories';
 import { computeAggregates } from './aggregates';
-import { enforceStatedMethod, registrationWarnings } from './guards';
+import { CARD_PAYMENT_DUP_DAYS, enforceStatedMethod, registrationWarnings } from './guards';
 import { loadAdvisorData, loadBalancesReadonly, renderProjection } from './insights';
 import { detectRecurring, findNewCandidates, normalizeDesc } from './recurring';
 import { summarizeSearch } from './search';
@@ -15,7 +15,7 @@ import { renderCosto, summarizeUsage } from './usage';
 import type { RecurringPayment } from './recurring';
 import { HELP_TEXT, matchCommand, matchCorrection, matchMethodAnswer } from './commands';
 import type { Command } from './commands';
-import { daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from './dates';
+import { addDaysTo, daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from './dates';
 import {
   appendConversation,
   deleteBudget,
@@ -686,8 +686,16 @@ async function persistOutcome(
 
 /** Escudos: posibles duplicados y montos grandes en lo recién registrado. */
 async function warningsFor(newTxns: Transaction[]): Promise<string[]> {
-  const dates = [...new Set(newTxns.map((t) => t.date))];
-  const existing = (await Promise.all(dates.map((d) => queryDay(d)))).flat();
+  const dates = [...new Set(newTxns.map((t) => t.date))].sort();
+  // Un pago de tarjeta se compara contra su ciclo, no contra el día: el
+  // comprobante trae la fecha del cierre y el registro cae cuando cae. Una
+  // sola consulta por rango cubre la ventana.
+  const window = newTxns.some((t) => t.type === 'transferencia' && t.category === 'deuda')
+    ? CARD_PAYMENT_DUP_DAYS
+    : 0;
+  const existing = window
+    ? await queryRange(addDaysTo(dates[0]!, -window), addDaysTo(dates[dates.length - 1]!, window))
+    : (await Promise.all(dates.map((d) => queryDay(d)))).flat();
   return registrationWarnings(newTxns, existing);
 }
 
