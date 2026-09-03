@@ -113,6 +113,19 @@ describe('accountDelta', () => {
     expect(accountDelta(pago, 'tarjeta')).toBe(1500);
     expect(accountDelta(pago, 'kash')).toBe(0);
   });
+
+  // Incidente 3-sep: el pago llegó etiquetado credito y la regla de crédito
+  // ganaba antes que la de pago, así que el abono SUBÍA la deuda.
+  it('un pago de tarjeta etiquetado CREDITO igual baja la deuda, nunca la sube', () => {
+    const pago = txn({ type: 'transferencia', method: 'credito', category: 'deuda', amount: 4831.78 });
+    expect(accountDelta(pago, 'tarjeta')).toBe(4831.78); // antes: -4831.78
+    expect(accountDelta(pago, 'banco')).toBe(-4831.78);
+  });
+
+  it('un consumo con la tarjeta sigue subiendo la deuda, y un adelanto también', () => {
+    expect(accountDelta(txn({ method: 'credito', category: 'comida', amount: 300 }), 'tarjeta')).toBe(-300);
+    expect(accountDelta(txn({ type: 'retiro', method: 'credito', amount: 300 }), 'tarjeta')).toBe(-300);
+  });
 });
 
 describe('computeBalances', () => {
@@ -137,6 +150,18 @@ describe('computeBalances', () => {
     ];
     const [banco] = computeBalances(accounts, txns);
     expect(banco!.balance).toBe(7793.68); // antes daba -6335.90
+  });
+
+  // Reproducción exacta del incidente 3-sep con los saldos reales del chat.
+  it('pagar el cierre de la BAC deja la deuda en -2,274.09, no en -7,592.13', () => {
+    const accounts = [account('banco', 6953.65, '2026-08-14'), account('tarjeta', -7349, '2026-08-14')];
+    const txns = [
+      txn({ date: '2026-08-15', type: 'transferencia', category: 'deuda', method: 'credito', amount: 4831.78 }),
+      txn({ date: '2026-08-15', type: 'transferencia', category: 'deuda', method: 'credito', amount: 243.13 }),
+    ];
+    const [banco, tarjeta] = computeBalances(accounts, txns);
+    expect(banco!.balance).toBe(1878.74);
+    expect(tarjeta!.balance).toBe(-2274.09);
   });
 
   it('la deuda de tarjeta baja con pagos y sube con compras', () => {

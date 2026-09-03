@@ -97,6 +97,60 @@ describe('registrationWarnings', () => {
     const warnings = registrationWarnings([cena], [cerveza, cena]);
     expect(warnings).toHaveLength(0);
   });
+
+  // Incidente 3-sep: el mismo abono al cierre del 15-ago se registró otra vez
+  // el 3-sep y el escudo calló porque exigía la MISMA fecha. Q4,831.78 de más
+  // contra BI.
+  it('el mismo pago de tarjeta en otro día SÍ avisa (fecha del cierre ≠ día de registro)', () => {
+    const cierre = txn({
+      sk: 'TXN#2026-08-15#cierre',
+      date: '2026-08-15',
+      shortId: 4,
+      amount: 4831.78,
+      type: 'transferencia',
+      category: 'deuda',
+      description: 'Pago tarjeta BAC - cierre 15 agosto',
+    });
+    const reintento = txn({
+      date: '2026-09-03',
+      shortId: 2,
+      amount: 4831.78,
+      type: 'transferencia',
+      category: 'deuda',
+      description: 'Pago de tarjeta BAC',
+    });
+    const warnings = registrationWarnings([reintento], [cierre, reintento]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Posible duplicado');
+    expect(warnings[0]).toContain('2026-08-15');
+  });
+
+  it('dos pagos de tarjeta iguales pero separados por ciclos NO acusan', () => {
+    const julio = txn({
+      sk: 'TXN#2026-07-15#j',
+      date: '2026-07-15',
+      shortId: 1,
+      amount: 1500,
+      type: 'transferencia',
+      category: 'deuda',
+      description: 'Pago tarjeta BAC',
+    });
+    const septiembre = txn({
+      date: '2026-09-03',
+      shortId: 2,
+      amount: 1500,
+      type: 'transferencia',
+      category: 'deuda',
+      description: 'Pago tarjeta BAC',
+    });
+    expect(registrationWarnings([septiembre], [julio, septiembre])).toHaveLength(0);
+  });
+
+  it('la ventana ancha es solo para pagos de tarjeta: dos almuerzos de Q45 en días distintos no acusan', () => {
+    const lunes = txn({ sk: 'TXN#2026-09-01#l', date: '2026-09-01', shortId: 1, description: 'almuerzo' });
+    const martes = txn({ date: '2026-09-02', shortId: 1, description: 'almuerzo' });
+    expect(registrationWarnings([martes], [lunes, martes])).toHaveLength(0);
+  });
 });
 
 /**
@@ -121,7 +175,7 @@ describe('statedMethod: la cuenta que el mensaje NOMBRA manda', () => {
 
   it('mayúsculas, minúsculas y tildes dan el MISMO resultado', () => {
     const variantes = ['tarjeta BI', 'tarjeta bi', 'Tarjeta Bi', 'tarjeta de BI'];
-    const metodos = new Set(variantes.map(statedMethod));
+    const metodos = new Set(variantes.map((v) => statedMethod(v)));
     expect(metodos).toEqual(new Set(['debito']));
   });
 
@@ -137,6 +191,20 @@ describe('statedMethod: la cuenta que el mensaje NOMBRA manda', () => {
   it('no confunde palabras que contienen "bi" ni "bac"', () => {
     expect(statedMethod('compré una bicicleta de 900')).toBeNull();
     expect(statedMethod('pagué el bachillerato')).toBeNull();
+  });
+
+  // Incidente 3-sep: "pagar la tarjeta BAC" imponía credito y el abono SUBÍA
+  // la deuda. En un pago, la tarjeta nombrada es el destino, no la fuente.
+  it('en un PAGO de tarjeta, nombrar la BAC no la vuelve la fuente', () => {
+    const texto = 'Procedemos pagar la tarjeta BAC esto fue al cierre';
+    expect(statedMethod(texto)).toBe('credito');
+    expect(statedMethod(texto, { cardPayment: true })).toBeNull();
+  });
+
+  it('descartada la BAC, la cuenta que queda SÍ es la fuente del pago', () => {
+    const texto = 'Este es el saldo a pagar de la tarjeta de crédito Bac esto lo pagamos con la cuenta Bi';
+    expect(statedMethod(texto)).toBeNull(); // BAC y BI se anulaban entre sí
+    expect(statedMethod(texto, { cardPayment: true })).toBe('debito');
   });
 });
 
@@ -161,5 +229,33 @@ describe('enforceStatedMethod: corrige al modelo y deja constancia', () => {
     const { txns, corrections } = enforceStatedMethod(retiro, 'Se retiró 1000 de la cuenta BI ahora pasan hacer efectivo');
     expect(txns[0]!.method).toBe('debito');
     expect(corrections).toEqual([]);
+  });
+
+  // Los dos comprobantes del incidente 3-sep, con su texto textual.
+  it('el abono al cierre de la BAC no se convierte en consumo con la BAC', () => {
+    const pago = [
+      txn({ type: 'transferencia', category: 'deuda', method: 'debito', description: 'Pago tarjeta BAC - cierre 15 agosto', amount: 4831.78 }),
+    ];
+    const { txns, corrections } = enforceStatedMethod(pago, 'Procedemos pagar la tarjeta BAC esto fue al cierre');
+    expect(txns[0]!.method).toBe('debito'); // antes: credito
+    expect(corrections).toEqual([]);
+  });
+
+  it('"lo pagamos con la cuenta Bi": el pago sale de BI aunque el texto diga BAC', () => {
+    const pago = [
+      txn({ type: 'transferencia', category: 'deuda', method: 'transferencia', description: 'Pago de tarjeta BAC', amount: 4831.78 }),
+    ];
+    const { txns, corrections } = enforceStatedMethod(
+      pago,
+      'Este es el saldo a pagar de la tarjeta de crédito Bac esto lo pagamos con la cuenta Bi realiza la resta',
+    );
+    expect(txns[0]!.method).toBe('debito');
+    expect(corrections[0]).toContain('transferencia → debito');
+  });
+
+  it('un consumo CON la BAC en el mismo mensaje sigue siendo crédito', () => {
+    const consumo = [txn({ type: 'gasto', category: 'comida', method: 'debito', description: 'Cena' })];
+    const { txns } = enforceStatedMethod(consumo, 'pagué la cena con la BAC 300');
+    expect(txns[0]!.method).toBe('credito');
   });
 });

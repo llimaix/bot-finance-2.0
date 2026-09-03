@@ -1,5 +1,11 @@
+import { addDaysTo } from './dates';
 import { formatQ } from './format';
-import type { Method, Transaction } from './types';
+import type { Category, Method, Transaction, TxnType } from './types';
+
+/** Movimiento que abona a la tarjeta: transferencia de categoría deuda. */
+function isCardPayment(t: { type: TxnType; category: Category }): boolean {
+  return t.type === 'transferencia' && t.category === 'deuda';
+}
 
 /**
  * La cuenta que el mensaje nombra sin lugar a dudas. El prompt ya lo explica,
@@ -22,12 +28,18 @@ const ACCOUNT_SIGNALS: ReadonlyArray<{ re: RegExp; method: Method }> = [
   { re: /\befectivo\b|\bbilletes\b/, method: 'efectivo' },
 ];
 
-export function statedMethod(text: string): Method | null {
+export function statedMethod(text: string, opts: { cardPayment?: boolean } = {}): Method | null {
   const t = text
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .toLowerCase();
-  const hits = new Set(ACCOUNT_SIGNALS.filter((s) => s.re.test(t)).map((s) => s.method));
+  // En un PAGO de tarjeta, nombrar la BAC ("pagar la tarjeta BAC") señala el
+  // DESTINO, no la fuente: nadie paga la tarjeta con la propia tarjeta. Sin
+  // esta excepción el guardián imponía credito y el abono subía la deuda
+  // (incidente 3-sep). Descartadas esas señales, la cuenta que quede —"lo
+  // pagamos con la cuenta BI"— sí es la fuente y vuelve a mandar.
+  const signals = opts.cardPayment ? ACCOUNT_SIGNALS.filter((s) => s.method !== 'credito') : ACCOUNT_SIGNALS;
+  const hits = new Set(signals.filter((s) => s.re.test(t)).map((s) => s.method));
   return hits.size === 1 ? [...hits][0]! : null;
 }
 
@@ -36,16 +48,15 @@ export function statedMethod(text: string): Method | null {
  * Devuelve los movimientos corregidos y una nota por cada cambio: corregir un
  * saldo en silencio es peor que no corregirlo, porque Allan no puede auditarlo.
  */
-export function enforceStatedMethod<T extends { method: Method; description: string }>(
-  txns: ReadonlyArray<T>,
-  text: string,
-): { txns: T[]; corrections: string[] } {
-  const stated = statedMethod(text);
-  if (!stated) return { txns: [...txns], corrections: [] };
-
+export function enforceStatedMethod<
+  T extends { method: Method; description: string; type: TxnType; category: Category },
+>(txns: ReadonlyArray<T>, text: string): { txns: T[]; corrections: string[] } {
   const corrections: string[] = [];
+  // Por movimiento, no por mensaje: un mismo texto puede nombrar el destino de
+  // un pago de tarjeta y la cuenta de la que sale.
   const fixed = txns.map((t) => {
-    if (t.method === stated) return t;
+    const stated = statedMethod(text, { cardPayment: isCardPayment(t) });
+    if (!stated || t.method === stated) return t;
     corrections.push(`«${t.description}»: ${t.method} → ${stated}`);
     return { ...t, method: stated };
   });
@@ -81,12 +92,24 @@ function descSimilarity(a: string, b: string): number {
 }
 
 /**
+ * Ventana en la que dos pagos de tarjeta del MISMO monto son el mismo pago.
+ * Un almuerzo de Q45 se repite todos los días; el abono del cierre, no.
+ */
+export const CARD_PAYMENT_DUP_DAYS = 30;
+
+/**
  * Escudos al registrar: detecta posibles duplicados y montos sospechosos.
  * Un duplicado es misma fecha + mismo monto + (misma categoría O descripción
  * similar) — la categoría sola no basta: el incidente del 11-jul duplicó un
  * préstamo cambiándole la categoría (deuda → prestamo). Devuelve advertencias
  * para anexar a la respuesta — nunca bloquea el registro (el botón 🗑️ queda
  * a un toque si era duplicado).
+ *
+ * Los pagos de tarjeta se comparan contra la VENTANA del ciclo, no contra el
+ * día: la fecha del comprobante y el día en que se registra casi nunca
+ * coinciden. El 3-sep se registró dos veces el mismo abono del cierre del
+ * 15-ago —Q4,831.78 de más contra BI— y el escudo lo dejó pasar porque el
+ * reintento cayó en otro día.
  */
 export function registrationWarnings(
   newTxns: ReadonlyArray<Transaction>,
@@ -96,10 +119,15 @@ export function registrationWarnings(
   const newSks = new Set(newTxns.map((t) => t.sk));
 
   for (const txn of newTxns) {
+    const cardPayment = isCardPayment(txn);
+    const from = cardPayment ? addDaysTo(txn.date, -CARD_PAYMENT_DUP_DAYS) : txn.date;
+    const to = cardPayment ? addDaysTo(txn.date, CARD_PAYMENT_DUP_DAYS) : txn.date;
     const dup = existing.find(
       (e) =>
         !newSks.has(e.sk) &&
-        e.date === txn.date &&
+        e.date >= from &&
+        e.date <= to &&
+        (!cardPayment || isCardPayment(e)) &&
         e.amount === txn.amount &&
         (e.category === txn.category || descSimilarity(e.description, txn.description) >= 0.5),
     );
