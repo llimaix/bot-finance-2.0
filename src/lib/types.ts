@@ -37,7 +37,10 @@ export interface CategoryRecord {
   createdAt: string;
 }
 
-export const METHODS = ['credito', 'debito', 'efectivo', 'transferencia', 'na'] as const;
+// banrural: la cuenta secundaria. Antes no tenía método propio y "depósito a
+// Banrural" se volvía debito → caía en BI (incidente 1-oct: bono de Q1,500
+// sumado a BI, Banrural congelada en Q40).
+export const METHODS = ['credito', 'debito', 'banrural', 'efectivo', 'transferencia', 'na'] as const;
 export type Method = (typeof METHODS)[number];
 
 /** Lo que devuelve el LLM por cada movimiento. */

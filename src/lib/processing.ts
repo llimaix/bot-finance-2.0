@@ -3,7 +3,7 @@ import { NO_WRITE_DISCLAIMER, needsDeterministicRegister, needsNoWriteDisclaimer
 import type { AgentDeps } from './ai/agent';
 import { answerQuestion, correctTransaction, materializeParsed, parseReceipt, parseTransactions } from './ai/parse';
 import type { ParseOutcome } from './ai/parse';
-import { DEFAULT_ACCOUNTS, renderSaldos } from './accounts';
+import { DEFAULT_ACCOUNTS, renderAffectedBalances, renderSaldos } from './accounts';
 import { renderMetas, suggestBudgets } from './budgets';
 import { resolveCategory } from './categories';
 import { computeAggregates } from './aggregates';
@@ -267,7 +267,12 @@ async function completePendingMethod(chatId: number, today: string, method: Meth
     emoji: pend.emoji ?? '🏷️',
   });
   const after: Transaction = { ...pend, method };
-  const reply = `✅ Listo, apliqué ${method} a:\n${renderTxnLine(after)}${pend.date !== today ? ` · 📅 ${pend.date}` : ''}`;
+  const balanceLines = await affectedBalanceLines([after], today);
+  const reply = [
+    `✅ Listo, apliqué ${method} a:`,
+    `${renderTxnLine(after)}${pend.date !== today ? ` · 📅 ${pend.date}` : ''}`,
+    ...balanceLines,
+  ].join('\n');
   await sendMessage(chatId, reply);
   logger.info('método pendiente aplicado', { sk: pend.sk, method, amount: pend.amount });
   return reply;
@@ -486,6 +491,9 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     reply += `\n\n${result.registered
       .map((t) => `${renderTxnLine(t)}${t.date !== today ? ` · 📅 ${t.date}` : ''}`)
       .join('\n')}`;
+    // Saldos leídos DESPUÉS de registrar: los del contexto son de antes.
+    const balanceLines = await affectedBalanceLines(result.registered, today);
+    if (balanceLines.length > 0) reply += `\n${balanceLines.join('\n')}`;
   }
   for (const warning of collectedWarnings) {
     reply += `\n${escapeHtml(warning)}`;
@@ -539,11 +547,16 @@ async function saveAndConfirm(
 
   const txns = await persistOutcome(outcome, rawMessage, today);
 
-  const [todayTxns, warnings] = await Promise.all([queryDay(today), warningsFor(txns)]);
+  const [todayTxns, warnings, balanceLines] = await Promise.all([
+    queryDay(today),
+    warningsFor(txns),
+    affectedBalanceLines(txns, today),
+  ]);
   let reply = renderConfirmation({
     txns,
     today,
     totalSpentToday: sumSpent(todayTxns),
+    balanceLines,
     clarification,
     ...(opts.transcript ? { transcript: opts.transcript } : {}),
     ...(opts.header ? { header: opts.header } : {}),
@@ -710,6 +723,18 @@ function deleteKeyboard(txns: Transaction[]): InlineKeyboardButton[][] {
 // ── Saldos y snapshot para preguntas ───────────────────────────────────────
 
 const loadBalances = loadBalancesReadonly;
+
+/** Saldo de las cuentas que tocaron estos movimientos, una línea por cuenta.
+ *  Es un extra de la confirmación: si la lectura falla se omite (los
+ *  movimientos ya están guardados y la confirmación debe llegar igual). */
+async function affectedBalanceLines(txns: ReadonlyArray<Transaction>, today: string): Promise<string[]> {
+  try {
+    return renderAffectedBalances(txns, await loadBalances(today));
+  } catch (err) {
+    logger.error('saldos tras registrar fallaron', { error: String(err) });
+    return [];
+  }
+}
 
 function summarizePeriod(label: string, txns: Transaction[], days: number) {
   const agg = computeAggregates(txns, days);

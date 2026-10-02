@@ -21,6 +21,7 @@ export function emojiForCategory(category: string, txns?: ReadonlyArray<Transact
 const METHOD_LABEL: Record<Method, string> = {
   credito: 'crédito',
   debito: 'débito',
+  banrural: 'Banrural',
   efectivo: 'efectivo',
   transferencia: 'transferencia',
   na: '',
@@ -68,6 +69,8 @@ export function renderConfirmation(opts: {
   /** Fecha de hoy: los movimientos retroactivos se marcan con su fecha. */
   today: string;
   totalSpentToday: number;
+  /** Saldo actualizado de cada cuenta tocada ("💵 Efectivo: Q300.00"). */
+  balanceLines?: string[];
   clarification: string | null;
   transcript?: string;
   header?: string;
@@ -81,6 +84,7 @@ export function renderConfirmation(opts: {
     const dateSuffix = txn.date !== opts.today ? ` · 📅 ${txn.date}` : '';
     lines.push(`${renderTxnLine(txn)}${dateSuffix}`);
   }
+  if (opts.balanceLines?.length) lines.push(...opts.balanceLines);
   lines.push(`Total gastado hoy: ${formatQ(opts.totalSpentToday)}`);
   if (opts.clarification) lines.push('', `❓ ${escapeHtml(opts.clarification)}`);
   // El ejemplo usa el número REAL del primer movimiento registrado: un "#2"

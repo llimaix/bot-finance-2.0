@@ -59,6 +59,22 @@ describe('renderConfirmation', () => {
     expect(msg).not.toContain('📅'); // movimiento de hoy: sin marca de fecha
   });
 
+  it('el saldo de la cuenta tocada va justo debajo del movimiento', () => {
+    const msg = renderConfirmation({
+      txns: [base],
+      today: '2026-07-10',
+      totalSpentToday: 45,
+      balanceLines: ['💵 Efectivo: Q300.00'],
+      clarification: null,
+    });
+    expect(msg).toContain('1. 🍽️ almuerzo — Q45.00 — efectivo\n💵 Efectivo: Q300.00\nTotal gastado hoy');
+  });
+
+  it('el depósito a Banrural se rotula Banrural, no débito', () => {
+    const bono: Transaction = { ...base, type: 'ingreso', method: 'banrural', amount: 1500, description: 'Bono' };
+    expect(renderTxnLine(bono)).toMatch(/Q1,500\.00 — Banrural$/);
+  });
+
   it('marca la fecha de los movimientos retroactivos', () => {
     const retro = { ...base, date: '2026-07-08', sk: 'TXN#2026-07-08#01X' };
     const msg = renderConfirmation({ txns: [retro], today: '2026-07-10', totalSpentToday: 0, clarification: null });

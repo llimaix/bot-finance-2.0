@@ -169,6 +169,7 @@ describe('statedMethod: la cuenta que el mensaje NOMBRA manda', () => {
     ['pagué con la BAC 300', 'credito'],
     ['Pago en efectivo desayuno con mi novia 100 quetzales', 'efectivo'],
     ['transferí 500 a Kash', 'transferencia'],
+    ['Registra un depósito a banrural de 1500 quetzales por un bono de trabajo', 'banrural'],
   ])('%s → %s', (text, expected) => {
     expect(statedMethod(text)).toBe(expected);
   });

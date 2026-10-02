@@ -125,6 +125,7 @@ describe('matchMethodAnswer (respuesta de "¿de qué cuenta?")', () => {
     expect(matchMethodAnswer('efectivo')).toBe('efectivo');
     expect(matchMethodAnswer('salió de débito')).toBe('debito');
     expect(matchMethodAnswer('Débito BI')).toBe('debito');
+    expect(matchMethodAnswer('fue de Banrural')).toBe('banrural');
   });
 
   it('NO matchea un gasto nuevo que menciona el método (tiene más contenido)', () => {

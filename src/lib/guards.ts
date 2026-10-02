@@ -23,7 +23,8 @@ const ACCOUNT_SIGNALS: ReadonlyArray<{ re: RegExp; method: Method }> = [
   { re: /\b(bi|banco industrial)\b/, method: 'debito' },
   { re: /\bbac\b/, method: 'credito' },
   { re: /\bcredito\b|\btarjeta de credito\b/, method: 'credito' },
-  { re: /\bbanrural\b/, method: 'debito' },
+  // Banrural tiene método propio: como debito iba a BI (incidente 1-oct).
+  { re: /\bbanrural\b/, method: 'banrural' },
   { re: /\bkash\b/, method: 'transferencia' },
   { re: /\befectivo\b|\bbilletes\b/, method: 'efectivo' },
 ];
