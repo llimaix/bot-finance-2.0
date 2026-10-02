@@ -21,7 +21,7 @@ export interface PromptContext {
 const CLASSIFICATION_RULES = `Regla de CUENTAS (Allan solo tiene estas) — de esto depende de qué cuenta sale el dinero:
 - "BI", "Banco Industrial", "tarjeta BI", "tarjeta de BI", "mi cuenta": es su cuenta de BANCO → method: debito. OJO: la tarjeta del BI es de DÉBITO aunque Allan la llame "tarjeta".
 - "BAC", "tarjeta BAC", "la de crédito", o "la tarjeta" a secas SIN nombrar banco: es su TARJETA DE CRÉDITO → method: credito.
-- "Banrural" → method: debito. "Kash" → method: transferencia. Billetes o "en efectivo" → method: efectivo.
+- "Banrural" (cuenta, depósito, transferencia o tarjeta de Banrural) → method: banrural, NUNCA debito: debito es BI. "Kash" → method: transferencia. Billetes o "en efectivo" → method: efectivo.
 - Si el mensaje no permite saber la cuenta, usa method "na" — el sistema le pregunta a Allan y la aplica. NUNCA adivines entre debito y credito: acertar por azar descuadra dos saldos a la vez (el banco y la tarjeta).
 
 Regla de TIPO (campo "type") — el signo del saldo depende de esto, no te guíes solo por la palabra que use Allan:
@@ -57,7 +57,7 @@ export function buildParseSystemPrompt(ctx: PromptContext): string {
   return `Eres un parser de transacciones financieras personales en Guatemala. Recibes un mensaje en español informal (posiblemente transcrito de audio, con errores de transcripción) que describe movimientos de dinero.
 
 Entrega el resultado llamando SIEMPRE (exactamente una vez) a la herramienta entregar_resultado, con esta estructura:
-{"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<resumen corto en español>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
+{"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|banrural|efectivo|transferencia|na","description":"<resumen corto en español>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
 
 ${COMMON_RULES(ctx)}
 
@@ -85,7 +85,7 @@ export function buildReceiptSystemPrompt(ctx: PromptContext): string {
   return `Eres un lector de comprobantes financieros de Guatemala. Recibes la FOTO de un ticket, recibo, voucher o factura, y opcionalmente un texto del usuario con contexto.
 
 Entrega el resultado llamando SIEMPRE (exactamente una vez) a la herramienta entregar_resultado, con esta estructura:
-{"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|efectivo|transferencia|na","description":"<comercio o concepto>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
+{"transactions":[{"amount":<number>,"currency":"GTQ|USD","type":"gasto|ingreso|retiro|deposito|transferencia","category":"<categoría>","method":"credito|debito|banrural|efectivo|transferencia|na","description":"<comercio o concepto>","date":null}],"clarification":null,"noMovements":false,"question":null,"newCategories":[]}
 
 En imágenes, "question" y "noMovements" son siempre null/false.
 
@@ -96,7 +96,7 @@ Reglas para comprobantes:
 - NO todo comprobante es un gasto. Boletas de depósito, avisos de acreditamiento, comprobantes de transferencia recibida y estados de cuenta que muestran dinero ENTRANDO son type: ingreso (ver la "Regla de TIPO"). Un comprobante de planilla, bono o salario NUNCA es gasto.
 - description: el nombre del comercio (ej. "La Torre", "Shell zona 12"); si no es legible, el concepto general. Para dinero que entra, el concepto ("Planilla", "Bono", "Reembolso").
 - category: según el giro del comercio (supermercado, gasolinera→transporte, farmacia→salud, restaurante→comida, etc.). Para dinero que entra, la categoría del origen (salario/planilla/bono → "salario" si está en el catálogo), nunca "otros" por defecto.
-- method: el contexto que escribe Allan MANDA siempre, y se resuelve con la "Regla de CUENTAS" de arriba. Sin contexto: pagos/transferencias desde app bancaria (BI, Banrural, banca en línea) → debito; voucher de POS que diga explícitamente crédito → credito; efectivo evidente → efectivo. Si el comprobante no permite saber la cuenta (dice "débito/crédito" sin especificar), usa "na" — el sistema le preguntará a Allan de qué cuenta salió y la aplicará. NUNCA omitas el movimiento del comprobante por no saber la cuenta: se perdería.
+- method: el contexto que escribe Allan MANDA siempre, y se resuelve con la "Regla de CUENTAS" de arriba. Sin contexto: pagos/transferencias desde app bancaria (BI, banca en línea) → debito; desde Banrural → banrural; voucher de POS que diga explícitamente crédito → credito; efectivo evidente → efectivo. Si el comprobante no permite saber la cuenta (dice "débito/crédito" sin especificar), usa "na" — el sistema le preguntará a Allan de qué cuenta salió y la aplicará. NUNCA omitas el movimiento del comprobante por no saber la cuenta: se perdería.
 - date: la fecha impresa en el comprobante si es legible (yyyy-mm-dd); si no, null.
 - Si el TOTAL no es legible, NO lo inventes: transactions vacío y en "clarification" pregunta el monto.
 - Si la imagen no es un comprobante financiero, transactions vacío, noMovements=false y en "clarification" explica brevemente qué ves y pide el dato.
@@ -144,7 +144,7 @@ Tus herramientas y cuándo usarlas:
 
 Cómo se calculan los saldos (para que puedas explicarlos y detectar errores de registro):
 - Cada cuenta tiene una SEMILLA con fecha de corte; el saldo actual = semilla + efecto de los movimientos POSTERIORES a esa fecha.
-- Efectos: ingresos entran al BI; method=debito sale del BI; method=credito sube la deuda de la tarjeta; los RETIROS pasan dinero del banco/tarjeta al EFECTIVO; los gastos method=efectivo bajan el efectivo; transferencias a Kash mueven BI→Kash; pagos de tarjeta (transferencia+debito+deuda) mueven BI→tarjeta.
+- Efectos: ingresos entran al BI (con method=banrural entran a Banrural); method=debito sale del BI; method=banrural sale de Banrural; method=credito sube la deuda de la tarjeta; los RETIROS pasan dinero del banco/tarjeta al EFECTIVO; los gastos method=efectivo bajan el efectivo; transferencias a Kash mueven BI→Kash; pagos de tarjeta (transferencia+debito+deuda) mueven BI→tarjeta.
 - PAGO/ABONO A LA TARJETA DE CRÉDITO ("pagué la tarjeta", "cancelé la tarjeta", "aboné Q500 a la tarjeta"): regístralo como type=transferencia, category=deuda, method=debito (sale del BI y BAJA la deuda). NUNCA como gasto: un gasto baja el BI pero NO reduce la deuda, y el pago quedaría contado doble como pérdida. (Distinto: intereses o comisiones de la tarjeta SÍ son gasto.)
 - Por eso: si Allan retiró efectivo Y LUEGO lo gastó/prestó, registra DOS movimientos (el retiro + el gasto con method=efectivo). Si solo registra el retiro, el efectivo queda inflado. Si un saldo no le cuadra, usa buscar_movimientos para mostrarle qué lo compone y sugiere corregir el movimiento mal clasificado o ajustar con ajustar_cuenta.
 

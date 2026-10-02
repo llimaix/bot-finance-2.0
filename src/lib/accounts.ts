@@ -22,11 +22,16 @@ export const DEFAULT_ACCOUNTS: Array<Pick<Account, 'id' | 'name' | 'emoji'>> = [
  * - transferencia+method transferencia = banco → Kash.
  * - transferencia categoría deuda = pago de tarjeta (banco → tarjeta), con el
  *   método que venga: un pago NUNCA sube la deuda.
+ * - method=banrural es el "banco" de Banrural: todo lo que el banco haría con
+ *   ese movimiento lo hace Banrural, y BI no se entera.
  */
 export function accountDelta(txn: Transaction, account: AccountId): number {
   const a = txn.amount;
   switch (account) {
     case 'banco':
+      // Movimiento de Banrural: BI no lo ve (incidente 1-oct: el bono depositado
+      // a Banrural sumó a BI porque el ingreso entraba al banco "por defecto").
+      if (txn.method === 'banrural') return 0;
       // Ingresos NO en efectivo entran al banco; un ingreso en efectivo ya lo
       // suma la cuenta efectivo (contarlo aquí también lo duplicaba en el neto).
       if (txn.type === 'ingreso' && txn.method !== 'efectivo') return a;
@@ -41,9 +46,11 @@ export function accountDelta(txn: Transaction, account: AccountId): number {
       return 0;
 
     case 'banrural':
-      // Cuenta secundaria casi estática: se ajusta por semilla (/saldo o el agente),
-      // los movimientos con débito se atribuyen a la cuenta principal (BI).
-      return 0;
+      // Solo lo que viene marcado banrural; un debito sin más sigue siendo BI.
+      if (txn.method !== 'banrural') return 0;
+      if (txn.type === 'ingreso' || txn.type === 'deposito') return a;
+      // Gasto, retiro (pasa a efectivo), transferencia o pago de tarjeta: sale.
+      return -a;
 
     case 'tarjeta':
       // Pago de tarjeta (BAJA la deuda): transferencia categoría deuda, con el
@@ -94,6 +101,20 @@ export function computeBalances(
     }
     return { ...acc, balance, movements };
   });
+}
+
+/**
+ * Una línea por cada cuenta que tocaron los movimientos recién registrados,
+ * con su saldo ya actualizado: "💵 Efectivo: Q300.00". Sin desglose — el
+ * detalle completo vive en /saldo.
+ */
+export function renderAffectedBalances(
+  txns: ReadonlyArray<Transaction>,
+  balances: ReadonlyArray<AccountBalance>,
+): string[] {
+  return balances
+    .filter((b) => txns.some((t) => accountDelta(t, b.id) !== 0))
+    .map((b) => `${b.emoji} ${b.name}: ${formatQ(b.balance)}`);
 }
 
 export function renderSaldos(balances: ReadonlyArray<AccountBalance>): string {

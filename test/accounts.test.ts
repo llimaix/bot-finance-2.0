@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accountDelta, computeBalances } from '../src/lib/accounts';
+import { accountDelta, computeBalances, renderAffectedBalances } from '../src/lib/accounts';
 import type { Account, Transaction } from '../src/lib/types';
 
 let n = 0;
@@ -172,6 +172,54 @@ describe('computeBalances', () => {
     ];
     const [tarjeta] = computeBalances(accounts, txns);
     expect(tarjeta!.balance).toBe(-3192.86);
+  });
+});
+
+describe('Banrural tiene método propio', () => {
+  // Reproducción exacta del incidente 1-oct con los saldos reales del chat.
+  it('el bono depositado a Banrural sube Banrural, no BI', () => {
+    const accounts = [account('banco', 5861.44, '2026-09-30'), account('banrural', 40, '2026-07-11')];
+    const bono = txn({ date: '2026-10-01', type: 'ingreso', method: 'banrural', category: 'otros', amount: 1500 });
+    const [banco, banrural] = computeBalances(accounts, [bono]);
+    expect(banrural!.balance).toBe(1540); // antes: Q40, congelada
+    expect(banco!.balance).toBe(5861.44); // antes: Q7,361.44
+  });
+
+  it('gastos, retiros y pagos con Banrural salen de Banrural; el retiro pasa a efectivo', () => {
+    const gasto = txn({ method: 'banrural', amount: 80 });
+    const retiro = txn({ type: 'retiro', method: 'banrural', amount: 200 });
+    const pago = txn({ type: 'transferencia', category: 'deuda', method: 'banrural', amount: 500 });
+    for (const t of [gasto, retiro, pago]) {
+      expect(accountDelta(t, 'banrural')).toBe(-t.amount);
+      expect(accountDelta(t, 'banco')).toBe(0);
+    }
+    expect(accountDelta(retiro, 'efectivo')).toBe(200);
+    expect(accountDelta(pago, 'tarjeta')).toBe(500);
+  });
+
+  it('un debito sin más sigue siendo BI', () => {
+    expect(accountDelta(txn({ method: 'debito', amount: 50 }), 'banrural')).toBe(0);
+    expect(accountDelta(txn({ type: 'ingreso', method: 'na', amount: 50 }), 'banrural')).toBe(0);
+  });
+});
+
+describe('renderAffectedBalances', () => {
+  it('una línea con el saldo de cada cuenta tocada, y nada más', () => {
+    const balances = [
+      { ...account('banco', 1000), name: 'Banco Industrial (BI)', emoji: '🏦', balance: 1000, movements: 3 },
+      { ...account('efectivo', 400), name: 'Efectivo', emoji: '💵', balance: 300, movements: 1 },
+    ];
+    const gasto = txn({ method: 'efectivo', amount: 100 });
+    expect(renderAffectedBalances([gasto], balances)).toEqual(['💵 Efectivo: Q300.00']);
+  });
+
+  it('un retiro toca dos cuentas: muestra las dos', () => {
+    const balances = [
+      { ...account('banco', 1000), name: 'BI', emoji: '🏦', balance: 800, movements: 1 },
+      { ...account('efectivo', 100), name: 'Efectivo', emoji: '💵', balance: 300, movements: 1 },
+    ];
+    const retiro = txn({ type: 'retiro', method: 'debito', amount: 200 });
+    expect(renderAffectedBalances([retiro], balances)).toEqual(['🏦 BI: Q800.00', '💵 Efectivo: Q300.00']);
   });
 });
 

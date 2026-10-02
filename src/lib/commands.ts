@@ -110,7 +110,7 @@ export function matchCorrection(text: string): Correction | null {
 // rellenos permitidos), no un gasto nuevo. Anclado a ^...$ con lista blanca de
 // rellenos → "gasté Q50 con débito" NO matchea (tiene palabras fuera de lista).
 const METHOD_ANSWER_RE =
-  /^\s*(?:(?:fue|es|era|lo\s+pagu[eé]|sali[oó]|con|de|la|el|una|tarjeta|del|banco|bac|bi)\s+)*(cr[eé]dito|d[eé]bito|efectivo)(?:\s+(?:bac|bi|contado|del\s+banco|de\s+bi))?\s*[.!]*\s*$/i;
+  /^\s*(?:(?:fue|es|era|lo\s+pagu[eé]|sali[oó]|con|de|la|el|una|tarjeta|del|banco|bac|bi)\s+)*(cr[eé]dito|d[eé]bito|efectivo|banrural)(?:\s+(?:bac|bi|contado|del\s+banco|de\s+bi))?\s*[.!]*\s*$/i;
 
 /** Detecta un mensaje que es SOLO la respuesta del método/cuenta ("Tarjeta
  *  crédito", "fue con débito", "efectivo"). Devuelve el método normalizado. */
@@ -120,6 +120,7 @@ export function matchMethodAnswer(text: string): Method | null {
   const raw = m[1]!.toLowerCase();
   if (raw.startsWith('cr')) return 'credito';
   if (raw.startsWith('d')) return 'debito';
+  if (raw === 'banrural') return 'banrural';
   return 'efectivo';
 }
 
