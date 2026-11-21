@@ -1,0 +1,238 @@
+import { describe, expect, it } from 'vitest';
+import { accountDelta, computeBalances, renderAffectedBalances } from '../src/lib/accounts';
+import type { Account, Transaction } from '../src/lib/types';
+
+let n = 0;
+function txn(partial: Partial<Transaction>): Transaction {
+  n += 1;
+  return {
+    sk: `TXN#2026-07-11#t${n}`,
+    date: '2026-07-11',
+    shortId: n,
+    amount: 100,
+    type: 'gasto',
+    category: 'otros',
+    method: 'debito',
+    description: `mov ${n}`,
+    rawMessage: '',
+    createdAt: '2026-07-11T12:00:00Z',
+    ...partial,
+  };
+}
+
+const account = (id: Account['id'], seedBalance: number, asOf = '2026-07-10'): Account => ({
+  id,
+  name: id,
+  emoji: '💰',
+  seedBalance,
+  asOf,
+  estimated: false,
+  updatedAt: '',
+});
+
+describe('accountDelta', () => {
+  it('gasto con débito sale del banco; con crédito sube deuda de tarjeta', () => {
+    const debito = txn({ method: 'debito', amount: 50 });
+    expect(accountDelta(debito, 'banco')).toBe(-50);
+    expect(accountDelta(debito, 'tarjeta')).toBe(0);
+
+    const credito = txn({ method: 'credito', amount: 80 });
+    expect(accountDelta(credito, 'tarjeta')).toBe(-80);
+    expect(accountDelta(credito, 'banco')).toBe(0);
+  });
+
+  it('ingreso entra al banco', () => {
+    const salario = txn({ type: 'ingreso', method: 'na', amount: 7500 });
+    expect(accountDelta(salario, 'banco')).toBe(7500);
+    expect(accountDelta(salario, 'efectivo')).toBe(0);
+  });
+
+  it('retiro: sale del banco (o tarjeta) y entra a efectivo', () => {
+    const atm = txn({ type: 'retiro', method: 'debito', amount: 500 });
+    expect(accountDelta(atm, 'banco')).toBe(-500);
+    expect(accountDelta(atm, 'efectivo')).toBe(500);
+
+    const adelantoTC = txn({ type: 'retiro', method: 'credito', amount: 300 });
+    expect(accountDelta(adelantoTC, 'tarjeta')).toBe(-300);
+    expect(accountDelta(adelantoTC, 'efectivo')).toBe(300);
+  });
+
+  // El tipo `deposito` no tenía NI UN test y no se había usado en producción
+  // desde abril. Se estrenó el 31-jul con la planilla y un bono, y los restó:
+  // BI pasó de Q728.89 a Q-6,335.90. Es el inverso exacto del retiro.
+  it('depósito ENTRA a la cuenta, no sale (incidente 31-jul: planilla restada de BI)', () => {
+    const planilla = txn({ type: 'deposito', method: 'debito', amount: 6294.79 });
+    expect(accountDelta(planilla, 'banco')).toBe(6294.79);
+    expect(accountDelta(planilla, 'efectivo')).toBe(0);
+  });
+
+  it('depósito en efectivo: sale del efectivo y entra al banco (no se evapora)', () => {
+    const billetes = txn({ type: 'deposito', method: 'efectivo', amount: 500 });
+    expect(accountDelta(billetes, 'efectivo')).toBe(-500);
+    expect(accountDelta(billetes, 'banco')).toBe(500);
+    // El neto no cambia: es dinero movido de bolsillo a cuenta, no dinero nuevo.
+    expect(accountDelta(billetes, 'efectivo') + accountDelta(billetes, 'banco')).toBe(0);
+  });
+
+  it('retiro y depósito son simétricos: uno deshace al otro', () => {
+    const saca = txn({ type: 'retiro', method: 'debito', amount: 300 });
+    const mete = txn({ type: 'deposito', method: 'efectivo', amount: 300 });
+    for (const cuenta of ['banco', 'efectivo'] as const) {
+      expect(accountDelta(saca, cuenta) + accountDelta(mete, cuenta)).toBe(0);
+    }
+  });
+
+  it('gasto en efectivo baja el efectivo, no el banco', () => {
+    const cash = txn({ method: 'efectivo', amount: 45 });
+    expect(accountDelta(cash, 'efectivo')).toBe(-45);
+    expect(accountDelta(cash, 'banco')).toBe(0);
+  });
+
+  it('transferencia a Kash: banco → kash', () => {
+    const kash = txn({ type: 'transferencia', method: 'transferencia', amount: 2000, category: 'otros' });
+    expect(accountDelta(kash, 'banco')).toBe(-2000);
+    expect(accountDelta(kash, 'kash')).toBe(2000);
+    expect(accountDelta(kash, 'tarjeta')).toBe(0);
+  });
+
+  it('pago de tarjeta: banco → tarjeta (baja la deuda)', () => {
+    const pago = txn({ type: 'transferencia', method: 'debito', category: 'deuda', amount: 2000 });
+    expect(accountDelta(pago, 'banco')).toBe(-2000);
+    expect(accountDelta(pago, 'tarjeta')).toBe(2000);
+  });
+
+  it('ingreso en EFECTIVO entra solo al efectivo, no también al banco (no se cuenta doble)', () => {
+    const cashIn = txn({ type: 'ingreso', method: 'efectivo', amount: 500, category: 'otros' });
+    expect(accountDelta(cashIn, 'efectivo')).toBe(500);
+    expect(accountDelta(cashIn, 'banco')).toBe(0);
+  });
+
+  it('pago de tarjeta por TRANSFERENCIA (no débito) también baja la deuda, no va a Kash', () => {
+    const pago = txn({ type: 'transferencia', method: 'transferencia', category: 'deuda', amount: 1500 });
+    expect(accountDelta(pago, 'banco')).toBe(-1500);
+    expect(accountDelta(pago, 'tarjeta')).toBe(1500);
+    expect(accountDelta(pago, 'kash')).toBe(0);
+  });
+
+  // Incidente 3-sep: el pago llegó etiquetado credito y la regla de crédito
+  // ganaba antes que la de pago, así que el abono SUBÍA la deuda.
+  it('un pago de tarjeta etiquetado CREDITO igual baja la deuda, nunca la sube', () => {
+    const pago = txn({ type: 'transferencia', method: 'credito', category: 'deuda', amount: 4831.78 });
+    expect(accountDelta(pago, 'tarjeta')).toBe(4831.78); // antes: -4831.78
+    expect(accountDelta(pago, 'banco')).toBe(-4831.78);
+  });
+
+  it('un consumo con la tarjeta sigue subiendo la deuda, y un adelanto también', () => {
+    expect(accountDelta(txn({ method: 'credito', category: 'comida', amount: 300 }), 'tarjeta')).toBe(-300);
+    expect(accountDelta(txn({ type: 'retiro', method: 'credito', amount: 300 }), 'tarjeta')).toBe(-300);
+  });
+});
+
+describe('computeBalances', () => {
+  it('semilla + solo movimientos posteriores al asOf', () => {
+    const accounts = [account('banco', 4101.01, '2026-07-10')];
+    const txns = [
+      txn({ date: '2026-07-10', method: 'debito', amount: 999 }), // = asOf → excluido
+      txn({ date: '2026-07-11', method: 'debito', amount: 100 }),
+      txn({ date: '2026-07-11', type: 'ingreso', method: 'na', amount: 50 }),
+    ];
+    const [banco] = computeBalances(accounts, txns);
+    expect(banco!.balance).toBe(4051.01);
+    expect(banco!.movements).toBe(2);
+  });
+
+  // Reproducción exacta del incidente 31-jul con los montos reales.
+  it('planilla y bono depositados SUBEN el saldo de BI', () => {
+    const accounts = [account('banco', 728.89, '2026-07-30')];
+    const txns = [
+      txn({ date: '2026-07-31', type: 'deposito', method: 'debito', amount: 770 }),
+      txn({ date: '2026-07-31', type: 'deposito', method: 'debito', amount: 6294.79 }),
+    ];
+    const [banco] = computeBalances(accounts, txns);
+    expect(banco!.balance).toBe(7793.68); // antes daba -6335.90
+  });
+
+  // Reproducción exacta del incidente 3-sep con los saldos reales del chat.
+  it('pagar el cierre de la BAC deja la deuda en -2,274.09, no en -7,592.13', () => {
+    const accounts = [account('banco', 6953.65, '2026-08-14'), account('tarjeta', -7349, '2026-08-14')];
+    const txns = [
+      txn({ date: '2026-08-15', type: 'transferencia', category: 'deuda', method: 'credito', amount: 4831.78 }),
+      txn({ date: '2026-08-15', type: 'transferencia', category: 'deuda', method: 'credito', amount: 243.13 }),
+    ];
+    const [banco, tarjeta] = computeBalances(accounts, txns);
+    expect(banco!.balance).toBe(1878.74);
+    expect(tarjeta!.balance).toBe(-2274.09);
+  });
+
+  it('la deuda de tarjeta baja con pagos y sube con compras', () => {
+    const accounts = [account('tarjeta', -4092.86, '2026-07-10')];
+    const txns = [
+      txn({ date: '2026-07-11', method: 'credito', amount: 100 }),
+      txn({ date: '2026-07-12', type: 'transferencia', method: 'debito', category: 'deuda', amount: 1000 }),
+    ];
+    const [tarjeta] = computeBalances(accounts, txns);
+    expect(tarjeta!.balance).toBe(-3192.86);
+  });
+});
+
+describe('Banrural tiene método propio', () => {
+  // Reproducción exacta del incidente 1-oct con los saldos reales del chat.
+  it('el bono depositado a Banrural sube Banrural, no BI', () => {
+    const accounts = [account('banco', 5861.44, '2026-09-30'), account('banrural', 40, '2026-07-11')];
+    const bono = txn({ date: '2026-10-01', type: 'ingreso', method: 'banrural', category: 'otros', amount: 1500 });
+    const [banco, banrural] = computeBalances(accounts, [bono]);
+    expect(banrural!.balance).toBe(1540); // antes: Q40, congelada
+    expect(banco!.balance).toBe(5861.44); // antes: Q7,361.44
+  });
+
+  it('gastos, retiros y pagos con Banrural salen de Banrural; el retiro pasa a efectivo', () => {
+    const gasto = txn({ method: 'banrural', amount: 80 });
+    const retiro = txn({ type: 'retiro', method: 'banrural', amount: 200 });
+    const pago = txn({ type: 'transferencia', category: 'deuda', method: 'banrural', amount: 500 });
+    for (const t of [gasto, retiro, pago]) {
+      expect(accountDelta(t, 'banrural')).toBe(-t.amount);
+      expect(accountDelta(t, 'banco')).toBe(0);
+    }
+    expect(accountDelta(retiro, 'efectivo')).toBe(200);
+    expect(accountDelta(pago, 'tarjeta')).toBe(500);
+  });
+
+  it('un debito sin más sigue siendo BI', () => {
+    expect(accountDelta(txn({ method: 'debito', amount: 50 }), 'banrural')).toBe(0);
+    expect(accountDelta(txn({ type: 'ingreso', method: 'na', amount: 50 }), 'banrural')).toBe(0);
+  });
+});
+
+describe('renderAffectedBalances', () => {
+  it('una línea con el saldo de cada cuenta tocada, y nada más', () => {
+    const balances = [
+      { ...account('banco', 1000), name: 'Banco Industrial (BI)', emoji: '🏦', balance: 1000, movements: 3 },
+      { ...account('efectivo', 400), name: 'Efectivo', emoji: '💵', balance: 300, movements: 1 },
+    ];
+    const gasto = txn({ method: 'efectivo', amount: 100 });
+    expect(renderAffectedBalances([gasto], balances)).toEqual(['💵 Efectivo: Q300.00']);
+  });
+
+  it('un retiro toca dos cuentas: muestra las dos', () => {
+    const balances = [
+      { ...account('banco', 1000), name: 'BI', emoji: '🏦', balance: 800, movements: 1 },
+      { ...account('efectivo', 100), name: 'Efectivo', emoji: '💵', balance: 300, movements: 1 },
+    ];
+    const retiro = txn({ type: 'retiro', method: 'debito', amount: 200 });
+    expect(renderAffectedBalances([retiro], balances)).toEqual(['🏦 BI: Q800.00', '💵 Efectivo: Q300.00']);
+  });
+});
+
+describe('renderSaldos', () => {
+  it('explica el modelo sin jerga: movimientos incluidos, no fecha críptica', async () => {
+    const { renderSaldos } = await import('../src/lib/accounts');
+    const text = renderSaldos([
+      { id: 'banco', name: 'Banco Industrial (BI)', emoji: '🏦', seedBalance: 915, asOf: '2026-07-12', estimated: false, updatedAt: '', balance: 3190.59, movements: 3 },
+      { id: 'efectivo', name: 'Efectivo', emoji: '💵', seedBalance: 0, asOf: '2026-07-15', estimated: false, updatedAt: '', balance: 0, movements: 0 },
+    ]);
+    expect(text).toContain('incluye tus últimos 3 movimientos');
+    expect(text).toContain('sin movimientos desde el 2026-07-15');
+    expect(text).not.toContain('+ 3 movs'); // la notación críptica no vuelve
+    expect(text).toContain('base confirmada');
+  });
+});

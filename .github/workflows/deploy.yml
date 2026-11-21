@@ -1,0 +1,99 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      # Valida que toda la infraestructura sintetiza (con placeholders de secretos)
+      - run: pnpm cdk synth FinanzasStack
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write # OIDC hacia AWS, sin access keys
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Eval GOLDEN contra el modelo real: 16 casos de conversaciones reales de
+      # producción (~$0.05 en MiniMax). No bloquea el deploy todavía — M3 tiene
+      # picos de latencia que darían falsos rojos; promover a bloqueante cuando
+      # se pruebe estable. Un ❌ aquí = revisar antes de confiar en el deploy.
+      - name: Eval golden del agente (no bloqueante)
+        continue-on-error: true
+        run: pnpm tsx scripts/eval-agent.ts
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_MODEL_AGENT: ${{ vars.LLM_MODEL_AGENT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          # Acepta el ARN como variable o como secret del environment
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN || secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Deploy
+        run: pnpm cdk deploy FinanzasStack --require-approval never --outputs-file cdk-outputs.json
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Solo hace falta si LLM_PROVIDER=minimax (vacío no estorba)
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ALLOWED_CHAT_ID: ${{ secrets.ALLOWED_CHAT_ID }}
+          # Variables (no secrets) del environment: cambiar de proveedor de IA
+          # es editarlas en GitHub y relanzar el workflow — sin tocar código.
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_MODEL_AGENT: ${{ vars.LLM_MODEL_AGENT }}
+          LLM_PROVIDER_VISION: ${{ vars.LLM_PROVIDER_VISION }}
+          LLM_MODEL_VISION: ${{ vars.LLM_MODEL_VISION }}
+          STT_PROVIDER: ${{ vars.STT_PROVIDER }}
+          BILLING_ALERT_EMAIL: ${{ vars.BILLING_ALERT_EMAIL }}
+
+      - name: Registrar webhook de Telegram
+        run: node scripts/set-webhook.mjs
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}

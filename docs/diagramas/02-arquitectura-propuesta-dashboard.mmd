@@ -1,0 +1,19 @@
+flowchart TD
+    U["Usuario en Telegram"] -->|"boton Ver dashboard"| MA["Telegram Mini App<br/>se abre dentro de Telegram"]
+    MA -->|"descarga HTML, JS y CSS"| CF["CloudFront con OAC"]
+    CF --> S3["S3 privado<br/>sitio estatico"]
+    MA -->|"GET /api/dashboard<br/>header con initData firmado"| APIGW["API Gateway HTTP<br/>throttling y CORS al dominio CloudFront"]
+    APIGW --> DL["Lambda dashboard-api<br/>solo lectura"]
+    DL -->|"1. valida HMAC de initData<br/>2. valida auth_date reciente<br/>3. valida user.id = ALLOWED_CHAT_ID"| SEC["Token del bot<br/>en SSM SecureString"]
+    DL -->|"Query ACC#, CYC#, SNAP#"| DDB[("DynamoDB<br/>finanzas-personales")]
+
+    SCH["EventBridge Scheduler<br/>08:30 guardian"] --> RM["Lambda reminder"]
+    RM -->|"escribe foto diaria SNAP#fecha"| DDB
+    RM -->|"aviso de corte y pago por tarjeta"| TG["Telegram Bot API"]
+
+    subgraph Graficas["Graficas del dashboard"]
+        G1["Barras: deuda por tarjeta al corte vs limite"]
+        G2["Dona: participacion de cada tarjeta en la deuda total"]
+        G3["Linea: libre por dia y proyeccion a fin de mes"]
+    end
+    MA --> Graficas

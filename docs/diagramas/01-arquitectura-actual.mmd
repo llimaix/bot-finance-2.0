@@ -1,0 +1,23 @@
+flowchart TD
+    U["Usuario en Telegram"] -->|"texto, voz o foto"| TG["Telegram Bot API"]
+    TG -->|"webhook con secret token"| APIGW["API Gateway HTTP<br/>POST /webhook"]
+    APIGW --> WH["Lambda webhook<br/>10 s: valida secret y chat_id"]
+    WH -->|"invocacion asincrona"| PR["Lambda processor<br/>180 s: agente, vision, voz, comandos"]
+    PR -->|"lectura y escritura"| DDB[("DynamoDB<br/>finanzas-personales<br/>single-table con PITR")]
+    PR -->|"LLM: agente, parseo, vision"| LLM["Anthropic o MiniMax<br/>via Vercel AI SDK"]
+    PR -->|"voz ogg-opus"| TR["Amazon Transcribe<br/>streaming es-US"]
+    PR -->|"respuestas y botones"| TG
+
+    SCH["EventBridge Scheduler<br/>hora de Guatemala"] -->|"08:30 guardian, 08:00 quincena,<br/>17:00 y 21:00 recordatorios,<br/>domingo 20:00 coach"| RM["Lambda reminder"]
+    SCH -->|"dia 1, 08:00"| MR["Lambda monthly-report"]
+    RM --> DDB
+    MR --> DDB
+    RM --> LLM
+    MR --> LLM
+    RM --> TG
+    MR --> TG
+
+    BUD["AWS Budget USD 10<br/>toda la cuenta"] -->|"al 100 por ciento"| KS["Kill switch:<br/>politica DENY-all en roles Lambda"]
+    ALR["Alarmas CloudWatch<br/>Errors >= 1 en 5 min"] --> SNS["SNS a correo"]
+
+    GH["GitHub Actions<br/>environment production"] -->|"OIDC, sin access keys"| CDK["cdk deploy FinanzasStack"]

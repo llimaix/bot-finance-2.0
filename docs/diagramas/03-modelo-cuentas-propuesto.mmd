@@ -1,0 +1,50 @@
+erDiagram
+    CUENTA ||--o{ MOVIMIENTO : "afecta"
+    CUENTA ||--o{ CICLO_TARJETA : "tiene, si es credito"
+    CUENTA ||--o{ TERMINACION : "se reconoce por"
+    INGRESO_ESPERADO }o--|| CUENTA : "se deposita en"
+    SNAPSHOT_DIARIO }o--o{ CUENTA : "fotografia saldos de"
+
+    CUENTA {
+        string id "ACC#bac-visa"
+        string tipo "debito, credito, efectivo, billetera"
+        string banco "BI, BAC, Banrural"
+        string nombre
+        number saldoSemilla
+        string asOf
+        number limite "solo credito"
+        number diaCorte "solo credito"
+        number diaPago "solo credito"
+    }
+    TERMINACION {
+        string ultimos4 "1234"
+        string cuentaId
+    }
+    MOVIMIENTO {
+        string sk "TXN#fecha#ulid"
+        string cuentaOrigen
+        string cuentaDestino
+        number montoCentavos
+        string tipo
+        string categoria
+    }
+    CICLO_TARJETA {
+        string sk "CYC#cuenta#yyyy-mm"
+        string fechaCorte
+        string fechaPago
+        number saldoAlCorte
+        number pagoMinimo
+        number pagado
+    }
+    INGRESO_ESPERADO {
+        string sk "INC#slug"
+        number monto
+        string frecuencia "quincenal, mensual"
+        string dias "15 y ultimo habil"
+    }
+    SNAPSHOT_DIARIO {
+        string sk "SNAP#fecha"
+        number netoLiquido
+        number deudaTotal
+        number libreProyectado
+    }
