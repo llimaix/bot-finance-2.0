@@ -6,8 +6,9 @@
  * Cada item queda etiquetado con rawMessage = "ingesta:<tag>" para poder
  * deshacer el lote completo.
  *
- * Uso (con credenciales AWS del perfil personal):
- *   AWS_PROFILE=personal AWS_REGION=us-east-1 TABLE_NAME=finanzas-personales \
+ * Uso (con credenciales AWS del perfil personal). ALLOWED_CHAT_ID decide la
+ * partición del usuario (PK = USER#<chat>):
+ *   AWS_PROFILE=personal AWS_REGION=us-east-1 TABLE_NAME=bot-finance-finanzas ALLOWED_CHAT_ID=<chat> \
  *     pnpm tsx scripts/ingest.ts data/ingesta-2026-05a07.json           # dry-run
  *     pnpm tsx scripts/ingest.ts data/ingesta-2026-05a07.json --apply   # escribe
  *     pnpm tsx scripts/ingest.ts --undo estados-2026-05a07              # borra el lote

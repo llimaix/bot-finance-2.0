@@ -28,7 +28,15 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
 });
 
-const PK = 'USER#allan';
+/**
+ * Partición del usuario: USER#<chat permitido>. Es una función y no una
+ * constante porque el chat llega con los secretos, que se cargan al empezar la
+ * invocación, después de importar este módulo. Antes era fija ('USER#allan').
+ */
+export function pk(): string {
+  return `USER#${config.allowedChatId}`;
+}
+
 const DEDUPE_TTL_SECONDS = 48 * 3600;
 
 // ── Idempotencia de updates de Telegram ────────────────────────────────────
@@ -40,7 +48,7 @@ export async function tryClaimUpdate(updateId: number): Promise<boolean> {
       new PutCommand({
         TableName: config.tableName,
         Item: {
-          PK,
+          PK: pk(),
           SK: `UPDATE#${updateId}`,
           ttl: Math.floor(Date.now() / 1000) + DEDUPE_TTL_SECONDS,
         },
@@ -64,7 +72,7 @@ export async function markReportedAndReserveShortIds(date: string, count: number
   const res = await doc.send(
     new UpdateCommand({
       TableName: config.tableName,
-      Key: { PK, SK: `DAY#${date}` },
+      Key: { PK: pk(), SK: `DAY#${date}` },
       UpdateExpression: 'SET reported = :t ADD lastShortId :n',
       ExpressionAttributeValues: { ':t': true, ':n': count },
       ReturnValues: 'UPDATED_NEW',
@@ -80,7 +88,7 @@ export async function markReported(date: string): Promise<void> {
 
 export async function getDayState(date: string): Promise<{ reported: boolean }> {
   const res = await doc.send(
-    new GetCommand({ TableName: config.tableName, Key: { PK, SK: `DAY#${date}` } }),
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: `DAY#${date}` } }),
   );
   return { reported: res.Item?.reported === true };
 }
@@ -92,7 +100,7 @@ export async function listCategories(): Promise<CategoryRecord[]> {
     new QueryCommand({
       TableName: config.tableName,
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
-      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'CAT#' },
+      ExpressionAttributeValues: { ':pk': pk(), ':prefix': 'CAT#' },
     }),
   );
   return (res.Items ?? []).map((it) => ({
@@ -109,7 +117,7 @@ export async function putCategoryIfAbsent(cat: CategoryRecord): Promise<void> {
     await doc.send(
       new PutCommand({
         TableName: config.tableName,
-        Item: { PK, SK: `CAT#${cat.name}`, ...cat },
+        Item: { PK: pk(), SK: `CAT#${cat.name}`, ...cat },
         ConditionExpression: 'attribute_not_exists(PK)',
       }),
     );
@@ -146,7 +154,7 @@ export async function listFacts(): Promise<Fact[]> {
     new QueryCommand({
       TableName: config.tableName,
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
-      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'FACT#' },
+      ExpressionAttributeValues: { ':pk': pk(), ':prefix': 'FACT#' },
       // Consistente: putFact cuenta justo después de escribir.
       ConsistentRead: true,
     }),
@@ -162,7 +170,7 @@ export async function putFact(fact: Fact): Promise<void> {
   if (existing.length >= FACTS_LIMIT) throw limitError();
 
   await doc.send(
-    new PutCommand({ TableName: config.tableName, Item: { PK, SK: `FACT#${fact.id}`, ...fact } }),
+    new PutCommand({ TableName: config.tableName, Item: { PK: pk(), SK: `FACT#${fact.id}`, ...fact } }),
   );
 
   // Otra escritura simultánea pudo pasar la misma comprobación: se vuelve a
@@ -178,7 +186,7 @@ export async function putFact(fact: Fact): Promise<void> {
 
 export async function deleteFact(id: string): Promise<void> {
   await doc.send(
-    new DeleteCommand({ TableName: config.tableName, Key: { PK, SK: `FACT#${id}` } }),
+    new DeleteCommand({ TableName: config.tableName, Key: { PK: pk(), SK: `FACT#${id}` } }),
   );
 }
 
@@ -187,7 +195,7 @@ export async function deleteFact(id: string): Promise<void> {
 export async function getProfile(): Promise<Profile | null> {
   const res = await doc.send(
     // Consistente: un cambio de nombre debe verse en el siguiente mensaje.
-    new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'CFG#perfil' }, ConsistentRead: true }),
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: 'CFG#perfil' }, ConsistentRead: true }),
   );
   if (!res.Item?.nombre) return null;
   return { nombre: res.Item.nombre as string, actualizadoEn: res.Item.actualizadoEn as string };
@@ -195,7 +203,7 @@ export async function getProfile(): Promise<Profile | null> {
 
 export async function putProfile(profile: Profile): Promise<void> {
   await doc.send(
-    new PutCommand({ TableName: config.tableName, Item: { PK, SK: 'CFG#perfil', ...profile } }),
+    new PutCommand({ TableName: config.tableName, Item: { PK: pk(), SK: 'CFG#perfil', ...profile } }),
   );
   logger.info('perfil actualizado', { longitudNombre: profile.nombre.length });
 }
@@ -207,7 +215,7 @@ const CONVERSATION_TTL_SECONDS = 72 * 3600;
 
 export async function getConversation(): Promise<ConversationMessage[]> {
   const res = await doc.send(
-    new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'CONV#main' } }),
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: 'CONV#main' } }),
   );
   return (res.Item?.messages as ConversationMessage[] | undefined) ?? [];
 }
@@ -226,7 +234,7 @@ const CONVERSATION_MAX_ATTEMPTS = 3;
 export async function appendConversation(newMessages: ConversationMessage[]): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     const res = await doc.send(
-      new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'CONV#main' }, ConsistentRead: true }),
+      new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: 'CONV#main' }, ConsistentRead: true }),
     );
     const current = (res.Item?.messages as ConversationMessage[] | undefined) ?? [];
     const version = (res.Item?.version as number | undefined) ?? 0;
@@ -237,7 +245,7 @@ export async function appendConversation(newMessages: ConversationMessage[]): Pr
         new PutCommand({
           TableName: config.tableName,
           Item: {
-            PK,
+            PK: pk(),
             SK: 'CONV#main',
             messages,
             version: version + 1,
@@ -260,14 +268,14 @@ export async function appendConversation(newMessages: ConversationMessage[]): Pr
 
 export async function getLastRecurringAskAt(): Promise<string | null> {
   const res = await doc.send(
-    new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'META#recask' } }),
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: 'META#recask' } }),
   );
   return (res.Item?.lastAt as string | undefined) ?? null;
 }
 
 export async function setLastRecurringAskAt(iso: string): Promise<void> {
   await doc.send(
-    new PutCommand({ TableName: config.tableName, Item: { PK, SK: 'META#recask', lastAt: iso } }),
+    new PutCommand({ TableName: config.tableName, Item: { PK: pk(), SK: 'META#recask', lastAt: iso } }),
   );
 }
 
@@ -278,7 +286,7 @@ export async function listRecurring(): Promise<RecurringRecord[]> {
     new QueryCommand({
       TableName: config.tableName,
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
-      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'REC#' },
+      ExpressionAttributeValues: { ':pk': pk(), ':prefix': 'REC#' },
     }),
   );
   return (res.Items ?? []).map((it) => ({
@@ -301,7 +309,7 @@ export async function putRecurring(record: RecurringRecord): Promise<void> {
   await doc.send(
     new PutCommand({
       TableName: config.tableName,
-      Item: { PK, SK: `REC#${record.slug}`, ...record },
+      Item: { PK: pk(), SK: `REC#${record.slug}`, ...record },
     }),
   );
   logger.info('recurrente actualizado', { slug: record.slug, status: record.status });
@@ -320,7 +328,7 @@ export async function addUsage(
   await doc.send(
     new UpdateCommand({
       TableName: config.tableName,
-      Key: { PK, SK: `USAGE#${month}` },
+      Key: { PK: pk(), SK: `USAGE#${month}` },
       UpdateExpression:
         'ADD inTokens :i, outTokens :o, calls :one, #mi :i, #mo :o, #fi :i, #fo :o',
       ExpressionAttributeNames: {
@@ -336,7 +344,7 @@ export async function addUsage(
 
 export async function getUsage(month: string): Promise<Record<string, unknown> | undefined> {
   const res = await doc.send(
-    new GetCommand({ TableName: config.tableName, Key: { PK, SK: `USAGE#${month}` } }),
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: `USAGE#${month}` } }),
   );
   return res.Item;
 }
@@ -348,7 +356,7 @@ export async function listBudgets(): Promise<BudgetRecord[]> {
     new QueryCommand({
       TableName: config.tableName,
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
-      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'BUD#' },
+      ExpressionAttributeValues: { ':pk': pk(), ':prefix': 'BUD#' },
     }),
   );
   return (res.Items ?? []).map((it) => ({
@@ -364,7 +372,7 @@ export async function putBudget(budget: BudgetRecord): Promise<void> {
   await doc.send(
     new PutCommand({
       TableName: config.tableName,
-      Item: { PK, SK: `BUD#${budget.category}`, ...budget },
+      Item: { PK: pk(), SK: `BUD#${budget.category}`, ...budget },
     }),
   );
   logger.info('meta actualizada', { category: budget.category, monthlyLimit: budget.monthlyLimit });
@@ -372,7 +380,7 @@ export async function putBudget(budget: BudgetRecord): Promise<void> {
 
 export async function deleteBudget(category: string): Promise<void> {
   await doc.send(
-    new DeleteCommand({ TableName: config.tableName, Key: { PK, SK: `BUD#${category}` } }),
+    new DeleteCommand({ TableName: config.tableName, Key: { PK: pk(), SK: `BUD#${category}` } }),
   );
   logger.info('meta eliminada', { category });
 }
@@ -384,7 +392,7 @@ export async function listAccounts(): Promise<Account[]> {
     new QueryCommand({
       TableName: config.tableName,
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
-      ExpressionAttributeValues: { ':pk': PK, ':prefix': 'ACC#' },
+      ExpressionAttributeValues: { ':pk': pk(), ':prefix': 'ACC#' },
     }),
   );
   return (res.Items ?? []).map((it) => ({
@@ -402,7 +410,7 @@ export async function putAccount(account: Account): Promise<void> {
   await doc.send(
     new PutCommand({
       TableName: config.tableName,
-      Item: { PK, SK: `ACC#${account.id}`, ...account },
+      Item: { PK: pk(), SK: `ACC#${account.id}`, ...account },
     }),
   );
   logger.info('cuenta actualizada', { id: account.id, seedBalance: account.seedBalance, asOf: account.asOf });
@@ -461,7 +469,7 @@ export async function putTransactions(txns: Transaction[]): Promise<void> {
     await doc.send(
       new PutCommand({
         TableName: config.tableName,
-        Item: { PK, SK: sk, ...rest },
+        Item: { PK: pk(), SK: sk, ...rest },
       }),
     );
   }
@@ -475,7 +483,7 @@ async function queryByPrefix(skPrefix: string): Promise<Transaction[]> {
       new QueryCommand({
         TableName: config.tableName,
         KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
-        ExpressionAttributeValues: { ':pk': PK, ':prefix': skPrefix },
+        ExpressionAttributeValues: { ':pk': pk(), ':prefix': skPrefix },
         ExclusiveStartKey: lastKey,
       }),
     );
@@ -499,7 +507,7 @@ export async function queryRange(fromDate: string, toDate: string): Promise<Tran
         TableName: config.tableName,
         KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
         ExpressionAttributeValues: {
-          ':pk': PK,
+          ':pk': pk(),
           ':from': `TXN#${fromDate}`,
           // sufijo alto para que el BETWEEN incluya todos los ulid del día final
           ':to': `TXN#${toDate}` + '￿',
@@ -515,7 +523,7 @@ export async function queryRange(fromDate: string, toDate: string): Promise<Tran
 
 export async function getTransaction(sk: string): Promise<Transaction | undefined> {
   const res = await doc.send(
-    new GetCommand({ TableName: config.tableName, Key: { PK, SK: sk } }),
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: sk } }),
   );
   return res.Item ? toTransaction(res.Item) : undefined;
 }
@@ -526,7 +534,7 @@ export async function findByShortId(date: string, shortId: number): Promise<Tran
 }
 
 export async function deleteTransaction(sk: string): Promise<void> {
-  await doc.send(new DeleteCommand({ TableName: config.tableName, Key: { PK, SK: sk } }));
+  await doc.send(new DeleteCommand({ TableName: config.tableName, Key: { PK: pk(), SK: sk } }));
 }
 
 /** Actualiza solo los campos regenerados por una corrección; conserva SK/shortId/rawMessage/createdAt. */
@@ -537,7 +545,7 @@ export async function updateTransactionFields(
   await doc.send(
     new UpdateCommand({
       TableName: config.tableName,
-      Key: { PK, SK: sk },
+      Key: { PK: pk(), SK: sk },
       UpdateExpression:
         'SET amount = :amount, #type = :type, category = :category, #method = :method, description = :description, emoji = :emoji',
       ExpressionAttributeNames: { '#type': 'type', '#method': 'method' },
