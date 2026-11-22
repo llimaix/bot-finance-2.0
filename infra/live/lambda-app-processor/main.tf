@@ -33,6 +33,7 @@ module "function" {
     TELEGRAM_SECRET_NAME = data.aws_secretsmanager_secret.telegram.name
     LLM_SECRET_NAME      = data.aws_secretsmanager_secret.llm.name
     LLM_PROVIDER         = var.llm_provider
+    ACCOUNTS_MODEL       = var.accounts_model
     STT_PROVIDER         = "aws"
   }
 
