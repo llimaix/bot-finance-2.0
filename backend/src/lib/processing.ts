@@ -4,7 +4,7 @@ import type { AgentDeps } from './ai/agent';
 import { answerQuestion, correctTransaction, materializeParsed, parseReceipt, parseTransactions } from './ai/parse';
 import type { DatedTransaction, ParseOutcome } from './ai/parse';
 import { DEFAULT_ACCOUNTS, renderAffectedBalances, renderSaldos } from './accounts';
-import { renderMetas, suggestBudgets } from './budgets';
+import { budgetCrossings, renderMetas, suggestBudgets } from './budgets';
 import { resolveCategory } from './categories';
 import { computeAggregates } from './aggregates';
 import { CARD_PAYMENT_DUP_DAYS, enforceStatedMethod, registrationWarnings } from './guards';
@@ -65,8 +65,8 @@ import type { ConfigSnapshot } from './v2/config';
 import { toCents } from './v2/money';
 import { applyUndo } from './v2/repo';
 import { loadCiclos, renderTarjetas } from './v2/tarjetas';
-import { proximosIngresos } from './v2/ingresos';
-import { calcularLibre, renderLibre } from './v2/libre';
+import { renderLibre } from './v2/libre';
+import { loadLibre } from './v2/snapshot';
 import { loadBalancesV2, renderAffectedV2, renderSaldosV2 } from './v2/saldos';
 import { planRegistroV2 } from './v2/registro';
 import type { PropuestaV2 } from './v2/registro';
@@ -848,7 +848,17 @@ async function warningsFor(newTxns: Transaction[]): Promise<string[]> {
   const existing = window
     ? await queryRange(addDaysTo(dates[0]!, -window), addDaysTo(dates[dates.length - 1]!, window))
     : (await Promise.all(dates.map((d) => queryDay(d)))).flat();
-  return registrationWarnings(newTxns, existing);
+  // Metas: solo avisa al cruzar 80 % o 100 % del tope (no en cada gasto).
+  const month = monthPrefixGT(0);
+  const metas = newTxns.some((t) => t.type === 'gasto' && t.date.startsWith(month))
+    ? await Promise.all([listBudgets(), queryRange(`${month}-01`, todayGT())])
+        .then(([budgets, monthTxns]) => budgetCrossings(budgets, monthTxns, newTxns, month))
+        .catch((err) => {
+          logger.error('avisos de meta fallaron', { error: String(err) });
+          return [] as string[];
+        })
+    : [];
+  return [...registrationWarnings(newTxns, existing), ...metas];
 }
 
 /** Botones 🗑️ por movimiento (callback_data del:<sk>, ≤64 bytes). */
@@ -1034,19 +1044,7 @@ async function handleCommand(chatId: number, today: string, command: Command): P
         await sendMessage(chatId, '"Libre" está disponible en el modelo nuevo de cuentas.');
         return;
       }
-      const [{ saldos }, { tarjetas }, ingresos, data] = await Promise.all([
-        loadBalancesV2(today),
-        loadCiclos(today),
-        loadIngresos(),
-        loadAdvisorData(today, daysInMonth(monthPrefixGT(0))),
-      ]);
-      // Gasto variable: promedio diario de los gastos del mes (modelo v2).
-      const gastoMes = data.monthTxns.reduce((a, t) => a + (t.v2?.tipo === 'gasto' ? t.v2.montoCentavos : 0), 0);
-      const gastoDiario = data.daysElapsed > 0 ? Math.round(gastoMes / data.daysElapsed) : 0;
-      const recurrentes = data.recurrentes
-        .filter((r) => r.tipo === 'gasto' && r.estado === 'confirmado')
-        .map((r) => ({ descripcion: r.descripcion, montoCentavos: toCents(r.montoTipico), dia: r.diaTipicoDePago, aunVieneEsteMes: r.aunVieneEsteMes }));
-      const libre = calcularLibre({ hoy: today, saldos, tarjetas, proximos: proximosIngresos(ingresos, today), recurrentes, gastoDiarioCentavos: gastoDiario });
+      const { libre, gastoDiario } = await loadLibre(today);
       await sendMessage(chatId, renderLibre(libre, gastoDiario));
       return;
     }

@@ -140,8 +140,8 @@ Tamaño: S, unos pocos PR pequeños; M, varios PR o uno mediano; L, varios PR co
 
 | PR | Cambio |
 |---|---|
-| `feat/` | Avisos de meta al registrar (`budgetProgress` en `warningsFor`) y tope global mensual opcional |
-| `feat/` | Foto diaria `SNAP#` escrita por el guardián, base de la gráfica de "libre" |
+| `feat/` | ✅ Avisos de meta al registrar: solo al cruzar 80 % y 100 % del tope. El tope global mensual se descarta (opcional) |
+| `feat/` | ✅ Foto diaria `SNAP#` silenciosa escrita por el guardián (solo cifras agregadas), base de la gráfica de "libre" |
 
 ### Fase 7: dashboard en Telegram Mini App (`v2.3.0`)
 

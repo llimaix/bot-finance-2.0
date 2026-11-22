@@ -11,6 +11,7 @@ import { sendMessage } from '../lib/telegram';
 import { alertasTarjetas, loadCiclos } from '../lib/v2/tarjetas';
 import { proximosIngresos } from '../lib/v2/ingresos';
 import { loadIngresos } from '../lib/v2/repo';
+import { guardarFotoDiaria, loadLibre } from '../lib/v2/snapshot';
 import type { ScheduleEvent } from '../lib/types';
 
 const PRIMARY_MESSAGE =
@@ -29,7 +30,13 @@ export const handler = async (event: ScheduleEvent): Promise<void> => {
     const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
     const findings = guardianFindings(data);
     // Modelo v2: avisos de corte, pago, vencimiento y uso del límite por tarjeta.
-    if (config.accountsModel === 'v2') findings.push(...alertasTarjetas((await loadCiclos(today)).tarjetas, today));
+    if (config.accountsModel === 'v2') {
+      findings.push(...alertasTarjetas((await loadCiclos(today)).tarjetas, today));
+      // Foto diaria silenciosa para el dashboard; si falla, los avisos siguen.
+      await loadLibre(today, data)
+        .then(({ libre }) => guardarFotoDiaria(today, libre))
+        .catch((err) => logger.error('foto diaria falló', { error: String(err) }));
+    }
     if (findings.length === 0) {
       logger.info('guardián sin hallazgos', { date: today });
       return;
