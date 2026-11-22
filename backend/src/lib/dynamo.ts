@@ -8,6 +8,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { DEFAULT_ACCOUNTS } from './accounts';
+import type { FlowState } from './flows/engine';
 import { SEED_CATEGORY_EMOJI } from './categories';
 import { config } from './config';
 import { logger } from './logger';
@@ -188,6 +189,54 @@ export async function deleteFact(id: string): Promise<void> {
   await doc.send(
     new DeleteCommand({ TableName: config.tableName, Key: { PK: pk(), SK: `FACT#${id}` } }),
   );
+}
+
+// ── Flujo guiado activo (item FLOW#activo) ─────────────────────────────────
+
+/** Flujo guardado: estado del motor + flujo que espera para empezar, si lo hay. */
+export interface StoredFlow {
+  state: FlowState;
+  /** El usuario inició otro flujo con este a medias: se le pregunta si lo abandona. */
+  pending?: { flowId: string; prefill: Record<string, string> };
+}
+
+export async function getActiveFlow(): Promise<{ flow: StoredFlow; version: number } | null> {
+  const res = await doc.send(
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: 'FLOW#activo' }, ConsistentRead: true }),
+  );
+  if (!res.Item?.state) return null;
+  return {
+    flow: { state: res.Item.state as FlowState, ...(res.Item.pending ? { pending: res.Item.pending } : {}) },
+    version: (res.Item.version as number | undefined) ?? 0,
+  };
+}
+
+/**
+ * Guarda el flujo si nadie lo cambió desde la lectura (`expectedVersion`; 0 = no
+ * existía). Dos respuestas casi simultáneas no se pisan: la segunda falla con
+ * ConditionalCheckFailedException y el adaptador pide repetirla.
+ */
+export async function saveActiveFlow(flow: StoredFlow, expectedVersion: number): Promise<void> {
+  await doc.send(
+    new PutCommand({
+      TableName: config.tableName,
+      Item: {
+        PK: pk(),
+        SK: 'FLOW#activo',
+        ...flow,
+        version: expectedVersion + 1,
+        // TTL de DynamoDB: borra flujos abandonados (el código también comprueba expiresAt).
+        ttl: Math.floor(flow.state.expiresAt / 1000),
+      },
+      ...(expectedVersion === 0
+        ? { ConditionExpression: 'attribute_not_exists(PK) OR attribute_not_exists(version)' }
+        : { ConditionExpression: 'version = :v', ExpressionAttributeValues: { ':v': expectedVersion } }),
+    }),
+  );
+}
+
+export async function deleteActiveFlow(): Promise<void> {
+  await doc.send(new DeleteCommand({ TableName: config.tableName, Key: { PK: pk(), SK: 'FLOW#activo' } }));
 }
 
 // ── Perfil del usuario (item CFG#perfil) ───────────────────────────────────

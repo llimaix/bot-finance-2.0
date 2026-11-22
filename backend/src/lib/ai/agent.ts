@@ -301,7 +301,7 @@ export async function runAgent(
 
       configurar_perfil: tool({
         description:
-          'Cambia el nombre con el que te diriges al usuario, cuando lo pida explícitamente ("llámame Luis", "mi nombre es Ana", "dime Luis Fernando"). Solo el nombre, sin apodos inventados ni títulos. No lo uses para hechos financieros (eso es recordar_dato).',
+          'Propone cambiar el nombre con el que te diriges al usuario, cuando lo pida explícitamente ("llámame Luis", "mi nombre es Ana", "dime Luis Fernando"). NO lo guarda: el sistema envía una tarjeta y el usuario confirma con botones. Solo el nombre, sin apodos inventados ni títulos. No la uses para hechos financieros (eso es recordar_dato).',
         inputSchema: z.object({ nombre: z.string().min(1).max(40) }),
         execute: async ({ nombre }) => deps.setUserName(nombre),
       }),

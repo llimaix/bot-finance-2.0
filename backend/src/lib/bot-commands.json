@@ -14,5 +14,6 @@
   { "command": "export", "description": "Exportar el mes en curso como CSV" },
   { "command": "borrar", "description": "Eliminar el movimiento #N de hoy" },
   { "command": "nombre", "description": "Cómo te llamo (cámbialo con /nombre Luis)" },
+  { "command": "cancelar", "description": "Salir de un paso guiado sin guardar" },
   { "command": "ayuda", "description": "Cómo usar el bot" }
 ]

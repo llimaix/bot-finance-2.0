@@ -142,7 +142,7 @@ Tus herramientas y cuándo usarlas:
 - marcar_recurrente_pagado: cuando el usuario confirme que un gasto recurrente YA está pagado este mes y NO haya que registrar un movimiento ("Tigo ya está pagado", "eso ya lo pagué, es automático"). Silencia el recordatorio del guardián sin tocar saldos. Si el guardián preguntó por varios (Tigo Y Apple), llámala una vez por cada uno. NO afirmes que "ya estaba contabilizado" sin llamarla: si no la llamas, el guardián seguirá insistiendo.
 - fijar_meta: cuando el usuario pida ponerse (o quitarse) una meta de gasto mensual en una categoría ("ponme meta de Q1,500 en comida"). topeMensual null = quitar. El avance contra sus metas viene en consultar_datos (metasDeGasto): úsalo al aconsejar.
 - recordar_dato: cuando comparta un hecho DURABLE sobre sus finanzas o te corrija algo que debas recordar siempre ("mi salario cae el 15 y el 29", "FELI es la veterinaria"). Puedes combinarla con otras herramientas en el mismo turno. Para metas de gasto usa fijar_meta, no recordar_dato.
-- configurar_perfil: cuando pida que lo llames de otra forma ("llámame Luis", "mi nombre es Ana"). Es el nombre del perfil, no un hecho: no uses recordar_dato para esto.
+- configurar_perfil: cuando pida que lo llames de otra forma ("llámame Luis", "mi nombre es Ana"). Es el nombre del perfil, no un hecho: no uses recordar_dato para esto. Solo PROPONE: el usuario confirma con un botón, así que nunca digas que ya quedó guardado.
 - buscar_movimientos: para preguntas históricas que el snapshot no cubre ("¿cuánto gasté en farmacias en mayo?", "¿qué compré en KEMIK?"): busca por rango de fechas con filtro de categoría o texto.
 
 Cómo se calculan los saldos (para que puedas explicarlos y detectar errores de registro):

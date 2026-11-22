@@ -59,7 +59,8 @@ import {
 } from './format';
 import { budgetMs, fits, remainingMs } from './deadline';
 import { logger } from './logger';
-import { changeUserName, currentUserName } from './profile';
+import { cancelActiveFlow, handleFlowCallback, handleFlowText, startFlow } from './flows/runner';
+import { changeUserName, currentUserName, normalizeName } from './profile';
 import { buildReport } from './report';
 import { getSttProvider } from './stt';
 import { answerCallbackQuery, getFileBuffer, sendDocument, sendMessage, sendTyping } from './telegram';
@@ -234,6 +235,13 @@ async function route(message: TelegramMessage): Promise<void> {
     return;
   }
 
+  // Con un flujo guiado a medias, el texto es la respuesta al paso actual.
+  // Los comandos de arriba siguen funcionando (y /cancelar lo aborta).
+  if (await handleFlowText(chatId, text)) {
+    await rememberExchange(text, '[respuesta a un flujo guiado]');
+    return;
+  }
+
   const correction = matchCorrection(text);
   if (correction) {
     const sent = await handleCorrection(chatId, today, correction.shortId, correction.text);
@@ -367,8 +375,20 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       await putFact({ id: ulid(), text: dato.trim(), createdAt: new Date().toISOString() });
       return { ok: true, aprendido: dato.trim() };
     },
-    // El nombre se valida en código (changeUserName), no se confía en el modelo.
-    setUserName: async (nombre) => changeUserName(nombre),
+    // El modelo PROPONE y el usuario confirma con botones: no se guarda aquí.
+    // El nombre se valida en código antes de proponerlo.
+    setUserName: async (nombre) => {
+      const valido = normalizeName(nombre);
+      if (!valido) {
+        return { ok: false, error: 'Nombre no válido: solo letras, espacios, apóstrofo o guion (máximo 40).' };
+      }
+      await startFlow(chatId, 'perfil', { nombre: valido });
+      return {
+        ok: true,
+        pendienteDeConfirmacion: true,
+        nota: 'Envié una tarjeta con botones para que el usuario confirme. NO digas que ya quedó guardado: pídele que confirme con ✅ Guardar.',
+      };
+    },
     correctMovement: async ({ numero, fecha, cambios }) => {
       // Defensa en profundidad: el esquema ya exige > 0, pero `??` dejaría
       // pasar un 0 y un negativo invertiría los saldos.
@@ -816,6 +836,8 @@ async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
   const chatId = callback.from.id;
   const data = callback.data ?? '';
 
+  if (await handleFlowCallback(callback)) return;
+
   if (data.startsWith('del:')) {
     const sk = data.slice(4);
     const txn = await getTransaction(sk);
@@ -902,6 +924,10 @@ async function handleCommand(chatId: number, today: string, command: Command): P
   switch (command.kind) {
     case 'ayuda':
       await sendMessage(chatId, HELP_TEXT);
+      return;
+
+    case 'cancelar':
+      if (!(await cancelActiveFlow(chatId))) await sendMessage(chatId, 'No hay nada en curso que cancelar.');
       return;
 
     case 'nombre': {
