@@ -153,6 +153,13 @@ export interface Fact {
   createdAt: string;
 }
 
+/** Perfil del usuario (item CFG#perfil): se cambia en caliente, sin redesplegar. */
+export interface Profile {
+  /** Nombre con el que el bot se dirige al usuario. */
+  nombre: string;
+  actualizadoEn: string;
+}
+
 // ── Memoria conversacional corta ───────────────────────────────────────────
 
 export interface ConversationMessage {

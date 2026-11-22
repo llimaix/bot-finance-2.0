@@ -17,6 +17,7 @@ export type Command =
   | { kind: 'metas'; action: MetasAction; invalidArgs: boolean }
   | { kind: 'costo' }
   | { kind: 'borrar'; shortId: number | null }
+  | { kind: 'nombre'; name: string | null }
   | { kind: 'ayuda' };
 
 export type MetasAction =
@@ -26,7 +27,7 @@ export type MetasAction =
   | { op: 'quitar'; category: string };
 
 const COMMAND_RE =
-  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|costo|borrar|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|costo|borrar|nombre|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -84,6 +85,9 @@ export function matchCommand(text: string): Command | null {
       const n = Number.parseInt(arg?.replace(/^#/, '') ?? '', 10);
       return { kind: 'borrar', shortId: Number.isInteger(n) && n > 0 ? n : null };
     }
+    case 'nombre':
+      // Sin argumento: muestra el nombre actual. La validación vive en profile.ts.
+      return { kind: 'nombre', name: arg ? arg : null };
     default:
       // /start, /help, /ayuda
       return { kind: 'ayuda' };
@@ -146,6 +150,7 @@ export const HELP_TEXT = [
   '/memoria — los hechos que el agente ha aprendido de ti',
   '/export — el mes en curso como archivo CSV',
   '/borrar N — elimina el movimiento #N de hoy',
+  '/nombre — cómo te llamo (cámbialo con: /nombre Luis)',
   '',
   'También puedes: mandar la 📸 foto de un ticket (con caption opcional), decir "ayer gasté..." para fechas pasadas, PREGUNTAR ("¿cuánto tengo?", "¿cuánto llevo en comida?") y corregir con "corrige #2 eran Q50".',
   '',

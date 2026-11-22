@@ -10,10 +10,10 @@ import { logger } from '../logger';
 import type { CategoryRecord, ParsedTransaction, Transaction } from '../types';
 import { getAgentModel, getModel, getVisionModel, logUsage, stripThinking } from './llm';
 import {
-  ANSWER_SYSTEM_PROMPT,
-  COACH_PAYDAY_SYSTEM_PROMPT,
-  COACH_WEEKLY_SYSTEM_PROMPT,
-  NARRATE_SYSTEM_PROMPT,
+  answerSystemPrompt,
+  coachPaydaySystemPrompt,
+  coachWeeklySystemPrompt,
+  narrateSystemPrompt,
   buildCorrectSystemPrompt,
   buildParseSystemPrompt,
   buildReceiptSystemPrompt,
@@ -265,7 +265,7 @@ export async function correctTransaction(
 export async function answerQuestion(question: string, snapshot: unknown): Promise<string> {
   const result = await generateText({
     model: getModel(),
-    system: ANSWER_SYSTEM_PROMPT,
+    system: answerSystemPrompt(),
     prompt: `Pregunta: ${question}\n\nSnapshot: ${JSON.stringify(snapshot)}`,
     temperature: 0,
     timeout: LLM_TIMEOUT_MS,
@@ -282,7 +282,7 @@ export async function answerQuestion(question: string, snapshot: unknown): Promi
 export async function coachNarrative(kind: 'weekly' | 'payday', input: unknown): Promise<string> {
   const result = await generateText({
     model: getAgentModel(),
-    system: kind === 'weekly' ? COACH_WEEKLY_SYSTEM_PROMPT : COACH_PAYDAY_SYSTEM_PROMPT,
+    system: kind === 'weekly' ? coachWeeklySystemPrompt() : coachPaydaySystemPrompt(),
     prompt: JSON.stringify(input),
     timeout: 30_000,
     maxOutputTokens: 2500,
@@ -295,7 +295,7 @@ export async function coachNarrative(kind: 'weekly' | 'payday', input: unknown):
 export async function narrateReport(aggregates: unknown): Promise<string> {
   const result = await generateText({
     model: getModel(),
-    system: NARRATE_SYSTEM_PROMPT,
+    system: narrateSystemPrompt(),
     prompt: JSON.stringify(aggregates),
     timeout: 30_000,
     maxOutputTokens: 3000,

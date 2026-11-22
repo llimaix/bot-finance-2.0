@@ -59,6 +59,7 @@ import {
 } from './format';
 import { budgetMs, fits, remainingMs } from './deadline';
 import { logger } from './logger';
+import { changeUserName, currentUserName } from './profile';
 import { buildReport } from './report';
 import { getSttProvider } from './stt';
 import { answerCallbackQuery, getFileBuffer, sendDocument, sendMessage, sendTyping } from './telegram';
@@ -310,7 +311,7 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       .join('; ')}.`,
     `Catálogo de categorías: ${cats.map((c) => c.name).join(', ')}.`,
     ...(facts.length > 0
-      ? [`Hechos que Allan te ha enseñado:\n${facts.map((f) => `- ${f.text}`).join('\n')}`]
+      ? [`Hechos que el usuario te ha enseñado:\n${facts.map((f) => `- ${f.text}`).join('\n')}`]
       : []),
     // Dos secciones TAJANTES HOY vs AYER: en una lista mezclada M3 confundía
     // los de ayer con los de hoy (21-jul: dijo "hoy hay 2 movimientos" que en
@@ -366,6 +367,8 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       await putFact({ id: ulid(), text: dato.trim(), createdAt: new Date().toISOString() });
       return { ok: true, aprendido: dato.trim() };
     },
+    // El nombre se valida en código (changeUserName), no se confía en el modelo.
+    setUserName: async (nombre) => changeUserName(nombre),
     correctMovement: async ({ numero, fecha, cambios }) => {
       // Defensa en profundidad: el esquema ya exige > 0, pero `??` dejaría
       // pasar un 0 y un negativo invertiría los saldos.
@@ -900,6 +903,25 @@ async function handleCommand(chatId: number, today: string, command: Command): P
     case 'ayuda':
       await sendMessage(chatId, HELP_TEXT);
       return;
+
+    case 'nombre': {
+      if (command.name === null) {
+        const actual = currentUserName();
+        await sendMessage(
+          chatId,
+          actual
+            ? `Te llamo <b>${escapeHtml(actual)}</b>. Para cambiarlo: /nombre &lt;tu nombre&gt;`
+            : 'Aún no sé cómo llamarte. Dímelo con: /nombre &lt;tu nombre&gt;',
+        );
+        return;
+      }
+      const result = await changeUserName(command.name);
+      await sendMessage(
+        chatId,
+        result.ok ? `✅ Te llamaré <b>${escapeHtml(result.nombre)}</b>.` : `⚠️ ${escapeHtml(result.error)}`,
+      );
+      return;
+    }
 
     case 'nada':
       // El día ya quedó marcado como reportado en route(); atajo sin pasar por el LLM.

@@ -52,6 +52,7 @@ const WRITE_TOOLS = new Set([
   'recordar_dato',
   'dia_sin_movimientos',
   'marcar_recurrente_pagado',
+  'configurar_perfil',
 ]);
 
 export const NO_WRITE_DISCLAIMER =
@@ -143,6 +144,8 @@ export interface AgentDeps {
   }) => Promise<unknown>;
   markNoMovements: () => Promise<void>;
   rememberFact: (dato: string) => Promise<unknown>;
+  /** Cambia el nombre con el que el bot se dirige al usuario (perfil CFG#perfil). */
+  setUserName: (nombre: string) => Promise<unknown>;
   searchMovements: (input: {
     desde: string;
     hasta: string;
@@ -200,7 +203,7 @@ export async function runAgent(
   const agentTools = {
       registrar_movimientos: tool({
         description:
-          'Registra movimientos de dinero NUEVOS de Allan (gastos, ingresos, retiros, depósitos, transferencias). NO la uses para movimientos que ya aparecen en el contexto o la conversación, ni cuando Allan está cuadrando/reconciliando sus cuentas: ahí corresponde consultar, corregir o eliminar. Declara en newCategories cualquier categoría nueva que uses.',
+          'Registra movimientos de dinero NUEVOS del usuario (gastos, ingresos, retiros, depósitos, transferencias). NO la uses para movimientos que ya aparecen en el contexto o la conversación, ni cuando el usuario está cuadrando/reconciliando sus cuentas: ahí corresponde consultar, corregir o eliminar. Declara en newCategories cualquier categoría nueva que uses.',
         inputSchema: z.object({
           transactions: z.array(parsedTransactionSchema).min(1),
           newCategories: z.array(newCategorySchema),
@@ -226,14 +229,14 @@ export async function runAgent(
 
       consultar_datos: tool({
         description:
-          'Datos financieros actuales de Allan: saldos por cuenta, neto líquido, pagos recurrentes (con si aún vienen este mes) y agregados de mes/semana. Úsala antes de responder preguntas o dar veredictos.',
+          'Datos financieros actuales del usuario: saldos por cuenta, neto líquido, pagos recurrentes (con si aún vienen este mes) y agregados de mes/semana. Úsala antes de responder preguntas o dar veredictos.',
         inputSchema: z.object({}),
         execute: async () => deps.snapshot(),
       }),
 
       ajustar_cuenta: tool({
         description:
-          'Corrige el saldo (al cierre de hoy) y/o el nombre de una cuenta cuando Allan lo indique. Deuda de tarjeta en negativo.',
+          'Corrige el saldo (al cierre de hoy) y/o el nombre de una cuenta cuando el usuario lo indique. Deuda de tarjeta en negativo.',
         inputSchema: z.object({
           cuenta: z.enum(ACCOUNT_IDS),
           nuevoSaldo: z.number().nullable(),
@@ -243,7 +246,7 @@ export async function runAgent(
       }),
 
       dia_sin_movimientos: tool({
-        description: 'Marca el día como "sin movimientos" cuando Allan lo diga explícitamente.',
+        description: 'Marca el día como "sin movimientos" cuando el usuario lo diga explícitamente.',
         inputSchema: z.object({}),
         execute: async () => {
           await deps.markNoMovements();
@@ -253,7 +256,7 @@ export async function runAgent(
 
       corregir_movimiento: tool({
         description:
-          'Corrige campos de un movimiento YA registrado (por su número del día). Úsala cuando Allan diga que algo quedó mal ("los últimos pagos fueron con débito", "el #3 era Q50"). Solo envía en cambios los campos a modificar (el resto null). fecha null = hoy. Para varios movimientos, llámala una vez por cada uno.',
+          'Corrige campos de un movimiento YA registrado (por su número del día). Úsala cuando el usuario diga que algo quedó mal ("los últimos pagos fueron con débito", "el #3 era Q50"). Solo envía en cambios los campos a modificar (el resto null). fecha null = hoy. Para varios movimientos, llámala una vez por cada uno.',
         inputSchema: z.object({
           numero: z.number().int().positive(),
           fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
@@ -264,7 +267,7 @@ export async function runAgent(
 
       eliminar_movimiento: tool({
         description:
-          'Elimina un movimiento YA registrado (por su número del día). fecha null = hoy. Confirma con Allan antes si hay ambigüedad sobre cuál borrar.',
+          'Elimina un movimiento YA registrado (por su número del día). fecha null = hoy. Confirma con el usuario antes si hay ambigüedad sobre cuál borrar.',
         inputSchema: z.object({
           numero: z.number().int().positive(),
           fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
@@ -274,14 +277,14 @@ export async function runAgent(
 
       marcar_recurrente_pagado: tool({
         description:
-          'Marca un gasto recurrente como YA PAGADO este mes cuando Allan lo confirme ("Tigo ya está pagado", "eso ya lo pagué") y NO haya que registrar un movimiento nuevo (es un cargo automático ya reflejado en sus saldos). Silencia el recordatorio del guardián sin tocar montos. Da la descripción del recurrente tal como aparece en sus datos.',
+          'Marca un gasto recurrente como YA PAGADO este mes cuando el usuario lo confirme ("Tigo ya está pagado", "eso ya lo pagué") y NO haya que registrar un movimiento nuevo (es un cargo automático ya reflejado en sus saldos). Silencia el recordatorio del guardián sin tocar montos. Da la descripción del recurrente tal como aparece en sus datos.',
         inputSchema: z.object({ descripcion: z.string().min(2) }),
         execute: async (input) => deps.markRecurringPaid(input),
       }),
 
       fijar_meta: tool({
         description:
-          'Fija (o quita) la meta de gasto mensual de una categoría cuando Allan lo pida ("ponme meta de Q1,500 en comida", "quita la meta de transporte"). topeMensual null = quitar la meta. Las metas vigentes y su avance vienen en consultar_datos (metasDeGasto).',
+          'Fija (o quita) la meta de gasto mensual de una categoría cuando el usuario lo pida ("ponme meta de Q1,500 en comida", "quita la meta de transporte"). topeMensual null = quitar la meta. Las metas vigentes y su avance vienen en consultar_datos (metasDeGasto).',
         inputSchema: z.object({
           categoria: z.string().min(2),
           topeMensual: z.number().positive().nullable(),
@@ -291,9 +294,16 @@ export async function runAgent(
 
       recordar_dato: tool({
         description:
-          'Guarda un hecho DURABLE que Allan comparta o corrija sobre sus finanzas o preferencias ("mi salario cae el 15 y el 29", "FELI es la veterinaria", "mi meta es ahorrar Q2,000/mes"). No para movimientos ni datos pasajeros. Escribe el dato en tercera persona, conciso.',
+          'Guarda un hecho DURABLE que el usuario comparta o corrija sobre sus finanzas o preferencias ("mi salario cae el 15 y el 29", "FELI es la veterinaria", "mi meta es ahorrar Q2,000/mes"). No para movimientos ni datos pasajeros. Escribe el dato en tercera persona, conciso.',
         inputSchema: z.object({ dato: z.string().min(5) }),
         execute: async ({ dato }) => deps.rememberFact(dato),
+      }),
+
+      configurar_perfil: tool({
+        description:
+          'Cambia el nombre con el que te diriges al usuario, cuando lo pida explícitamente ("llámame Luis", "mi nombre es Ana", "dime Luis Fernando"). Solo el nombre, sin apodos inventados ni títulos. No lo uses para hechos financieros (eso es recordar_dato).',
+        inputSchema: z.object({ nombre: z.string().min(1).max(40) }),
+        execute: async ({ nombre }) => deps.setUserName(nombre),
       }),
 
       buscar_movimientos: tool({

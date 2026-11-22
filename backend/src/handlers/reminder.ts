@@ -5,6 +5,7 @@ import { getDayState, queryRange } from '../lib/dynamo';
 import { escapeHtml, formatQ, renderWeek } from '../lib/format';
 import { guardianFindings, loadAdvisorData, paydayCoachInput, weeklyCoachInput } from '../lib/insights';
 import { logger } from '../lib/logger';
+import { loadProfile } from '../lib/profile';
 import { loadSecrets } from '../lib/secrets';
 import { sendMessage } from '../lib/telegram';
 import type { ScheduleEvent } from '../lib/types';
@@ -17,6 +18,7 @@ const FOLLOWUP_MESSAGE =
 
 export const handler = async (event: ScheduleEvent): Promise<void> => {
   await loadSecrets();
+  await loadProfile();
   const today = todayGT();
 
   if (event.kind === 'guardian') {
