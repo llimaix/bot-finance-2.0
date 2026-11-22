@@ -2,6 +2,7 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { config } from '../lib/config';
 import { logger } from '../lib/logger';
+import { loadSecrets } from '../lib/secrets';
 import type { TelegramUpdate } from '../lib/telegram';
 
 const lambda = new LambdaClient({});
@@ -18,6 +19,8 @@ const OK: APIGatewayProxyStructuredResultV2 = { statusCode: 200, body: 'ok' };
 export const handler = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> => {
+  await loadSecrets();
+
   // 1. Secret token del webhook (los headers llegan en minúsculas en HTTP API v2)
   if (event.headers['x-telegram-bot-api-secret-token'] !== config.telegramWebhookSecret) {
     logger.warn('secret token inválido');

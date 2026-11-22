@@ -3,10 +3,12 @@ import { daysInMonth, monthLabelES, monthPrefixGT } from '../lib/dates';
 import { queryMonth } from '../lib/dynamo';
 import { logger } from '../lib/logger';
 import { buildReport } from '../lib/report';
+import { loadSecrets } from '../lib/secrets';
 import { sendMessage } from '../lib/telegram';
 
 /** Día 1 de cada mes, 08:00 GT: reporte completo del mes que acaba de cerrar. */
 export const handler = async (): Promise<void> => {
+  await loadSecrets();
   const month = monthPrefixGT(-1);
   const prevMonth = monthPrefixGT(-2);
 

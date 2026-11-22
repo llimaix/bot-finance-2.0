@@ -1,4 +1,5 @@
 import { processUpdate } from '../lib/processing';
+import { loadSecrets } from '../lib/secrets';
 import type { TelegramUpdate } from '../lib/telegram';
 
 /**
@@ -8,5 +9,6 @@ import type { TelegramUpdate } from '../lib/telegram';
  * cualquier excepción no manejada dispara la alarma de la Lambda.
  */
 export const handler = async (event: { update: TelegramUpdate }): Promise<void> => {
+  await loadSecrets();
   await processUpdate(event.update);
 };
