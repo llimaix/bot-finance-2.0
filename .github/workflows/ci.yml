@@ -1,0 +1,92 @@
+name: ci
+
+# Puerta de calidad de los PR hacia main. Sin credenciales de AWS: no toca el
+# state ni despliega. El plan/apply y el despliegue de las Lambdas ocurren al
+# hacer merge a main (workflows terraform y lambdas).
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  TF_VERSION: 1.17.2
+  TFLINT_VERSION: v0.66.0
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: backend/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: fmt
+        run: terraform fmt -check -recursive infra
+
+      # -backend=false: resuelve providers y valida sin credenciales ni state.
+      - name: validate y tflint de cada root
+        run: |
+          set -euo pipefail
+          for dir in infra/live/*/; do
+            r=$(basename "$dir")
+            echo "::group::$r"
+            (cd "$dir" && terraform init -backend=false -lockfile=readonly >/dev/null \
+              && terraform validate \
+              && tflint --config="$GITHUB_WORKSPACE/infra/.tflint.hcl")
+            echo "::endgroup::"
+          done
+
+      - name: tflint de cada módulo
+        run: |
+          set -euo pipefail
+          for dir in infra/modules/*/; do
+            echo "::group::$(basename "$dir")"
+            tflint --chdir="$dir" --config="$GITHUB_WORKSPACE/infra/.tflint.hcl"
+            echo "::endgroup::"
+          done
