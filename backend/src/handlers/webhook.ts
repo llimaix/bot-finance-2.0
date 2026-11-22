@@ -1,5 +1,6 @@
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { chatIdDiagnostics } from '../lib/chat-id';
 import { config } from '../lib/config';
 import { logger } from '../lib/logger';
 import { loadSecrets } from '../lib/secrets';
@@ -36,7 +37,7 @@ export const handler = async (
   // 2. Bot personal: cualquier otro chat/usuario se ignora en silencio
   const senderId = message?.chat.id ?? callback?.from.id;
   if (String(senderId) !== config.allowedChatId) {
-    logger.warn('chat no permitido', { senderId });
+    logger.warn('chat no permitido', { senderId, ...chatIdDiagnostics(config.allowedChatId) });
     return OK;
   }
 

@@ -45,6 +45,29 @@ describe('loadSecrets', () => {
     expect(process.env.MINIMAX_API_KEY).toBe(''); // vacío en el secreto → no se pisa
   });
 
+  it('recorta espacios y saltos de línea pegados en la consola', async () => {
+    vi.stubEnv('TELEGRAM_SECRET_NAME', 'proj/telegram');
+    const { client } = fakeClient({
+      'proj/telegram': JSON.stringify({ bot_token: ' t ', webhook_secret: 'w\n', allowed_chat_id: '\t1199338066 ' }),
+    });
+
+    await loadSecrets(client);
+
+    expect(process.env.TELEGRAM_BOT_TOKEN).toBe('t');
+    expect(process.env.TELEGRAM_WEBHOOK_SECRET).toBe('w');
+    expect(process.env.ALLOWED_CHAT_ID).toBe('1199338066');
+  });
+
+  it('ignora valores que quedan vacíos tras recortar', async () => {
+    vi.stubEnv('TELEGRAM_SECRET_NAME', 'proj/telegram');
+    const { client } = fakeClient({ 'proj/telegram': JSON.stringify({ bot_token: '   ', allowed_chat_id: '1' }) });
+
+    await loadSecrets(client);
+
+    expect(process.env.TELEGRAM_BOT_TOKEN).toBe('');
+    expect(process.env.ALLOWED_CHAT_ID).toBe('1');
+  });
+
   it('lee cada secreto una sola vez por contenedor', async () => {
     vi.stubEnv('TELEGRAM_SECRET_NAME', 'proj/telegram');
     const { client, send } = fakeClient({ 'proj/telegram': JSON.stringify({ bot_token: 't' }) });
