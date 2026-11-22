@@ -7,6 +7,7 @@ import { logger } from '../logger';
 import { ACCOUNT_IDS, METHODS, TXN_TYPES } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
 import type { CrearCuentaInput, EditarCuentaInput, EntidadInput } from '../v2/config';
+import type { IngresoInput } from '../v2/ingresos';
 import { getAgentModel, logUsage, stripThinking } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
 import { newCategorySchema, parsedTransactionSchema } from './schema';
@@ -57,6 +58,7 @@ const WRITE_TOOLS = new Set([
   'gestionar_entidad',
   'crear_cuenta',
   'editar_cuenta',
+  'configurar_ingreso',
 ]);
 
 export const NO_WRITE_DISCLAIMER =
@@ -162,6 +164,7 @@ export interface AgentDeps {
   manageEntity: (input: EntidadInput) => Promise<unknown>;
   createAccount: (input: CrearCuentaInput) => Promise<unknown>;
   editAccount: (input: EditarCuentaInput) => Promise<unknown>;
+  configureIncome: (input: IngresoInput) => Promise<unknown>;
   searchMovements: (input: {
     desde: string;
     hasta: string;
@@ -397,6 +400,20 @@ export async function runAgent(
           activa: z.boolean().nullable().describe('false para cerrar la cuenta (conserva su historial)'),
         }),
         execute: async (input) => deps.editAccount(input),
+      }),
+
+      configurar_ingreso: tool({
+        description:
+          'Declara o cambia un ingreso esperado ("me pagan Q8,000 el 15 y el último a BI"). Se usa para el plan de quincena, /libre y para reconocer cuándo llega. 31 = último día del mes. Con el mismo nombre, actualiza el existente. Guarda directamente; el sistema muestra un resumen con botón Deshacer.',
+        inputSchema: z.object({
+          descripcion: z.string().min(1).max(60).describe('p. ej. "Salario"'),
+          monto: z.number().positive().describe('Monto NETO en quetzales'),
+          cuenta: z.string().min(1).describe('Cuenta donde se deposita (nombre, alias o terminación)'),
+          dias: z.array(z.number().int().min(1).max(31)).min(1),
+          ajuste: z.enum(['anterior_habil', 'siguiente_habil', 'ninguno']).nullable().describe('Si cae en fin de semana; null = hábil anterior'),
+          activo: z.boolean().nullable(),
+        }),
+        execute: async (input) => deps.configureIncome(input),
       }),
 
       buscar_movimientos: tool({

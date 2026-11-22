@@ -68,7 +68,7 @@ import { loadCiclos, renderTarjetas } from './v2/tarjetas';
 import { loadBalancesV2, renderAffectedV2, renderSaldosV2 } from './v2/saldos';
 import { planRegistroV2 } from './v2/registro';
 import type { PropuestaV2 } from './v2/registro';
-import { crearCuenta, editarCuenta, gestionarEntidad, loadSnapshot, renderConfig } from './v2/service';
+import { configurarIngreso, crearCuenta, editarCuenta, gestionarEntidad, loadIngresos, loadSnapshot, renderConfig } from './v2/service';
 import type { ServiceResult } from './v2/service';
 import { buildReport } from './report';
 import { getSttProvider } from './stt';
@@ -460,6 +460,7 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     manageEntity: async (input) => sendConfigResult(chatId, await gestionarEntidad(input)),
     createAccount: async (input) => sendConfigResult(chatId, await crearCuenta(input, today)),
     editAccount: async (input) => sendConfigResult(chatId, await editarCuenta(input, today)),
+    configureIncome: async (input) => sendConfigResult(chatId, await configurarIngreso(input)),
     correctMovement: async ({ numero, fecha, cambios }) => {
       // Defensa en profundidad: el esquema ya exige > 0, pero `??` dejaría
       // pasar un 0 y un negativo invertiría los saldos.
@@ -1036,7 +1037,7 @@ async function handleCommand(chatId: number, today: string, command: Command): P
       return;
 
     case 'cuentas':
-      await sendMessage(chatId, renderConfig(await loadSnapshot()));
+      await sendMessage(chatId, renderConfig(await loadSnapshot(), await loadIngresos()));
       return;
 
     case 'nombre': {
