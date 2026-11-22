@@ -29,7 +29,7 @@ env:
   # Orden de aplicación por capas. Los roots que aún no existen se ignoran.
   TF_ROOTS_ORDER: >-
     dynamodb secrets
-    lambda-app-webhook lambda-app-processor lambda-app-reminder lambda-app-monthly-report
+    lambda-app-processor lambda-app-webhook lambda-app-reminder lambda-app-monthly-report
     api-gateway scheduler observability budget
 
 jobs:
