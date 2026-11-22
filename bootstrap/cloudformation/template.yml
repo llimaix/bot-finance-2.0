@@ -1,0 +1,347 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  bot-finance - bootstrap: bucket S3 del state de Terraform, permissions boundary
+  y rol de GitHub Actions (reutiliza el OIDC provider existente de la cuenta).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bot-finance
+  Environment:
+    Type: String
+    Default: prod
+  GitHubOwner:
+    Type: String
+    Default: llimaix
+  GitHubOwnerId:
+    Type: String
+    Default: '158865846'
+    Description: ID numérico del owner (sub inmutable de GitHub OIDC)
+  GitHubRepo:
+    Type: String
+    Default: bot-finance-2.0
+  GitHubRepoId:
+    Type: String
+    Default: '1466256001'
+    Description: ID numérico del repo (cambia si el repo se recrea)
+  DeployBranch:
+    Type: String
+    Default: main
+
+Resources:
+  # ── State de Terraform ────────────────────────────────────────────────
+  TfStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ProjectName}-tfstate'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expirar-versiones-antiguas
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: cloudformation }
+        - { Key: Component, Value: tfstate }
+
+  TfStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TfStateBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt TfStateBucket.Arn
+              - !Sub '${TfStateBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+
+  # ── Techo de permisos para todo rol que cree Terraform ─────────────────
+  WorkloadBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'boundary-${ProjectName}'
+      Description: Techo de permisos de los roles creados por Terraform para bot-finance
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Logs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-*'
+              - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-*:*'
+          - Sid: DynamoData
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:BatchGetItem
+              - dynamodb:BatchWriteItem
+              - dynamodb:ConditionCheckItem
+              - dynamodb:DescribeTable
+            Resource:
+              - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectName}-*'
+              - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectName}-*/index/*'
+          - Sid: ReadOwnSecrets
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}/*'
+          - Sid: TranscribeStreaming
+            Effect: Allow
+            Action: transcribe:StartStreamTranscription
+            Resource: '*'
+          - Sid: InvokeOwnLambdas
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectName}-*'
+          - Sid: KillSwitchOnly
+            Effect: Allow
+            Action:
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
+            Condition:
+              ArnEquals:
+                'iam:PolicyARN': !Sub 'arn:aws:iam::${AWS::AccountId}:policy/${ProjectName}-kill-switch'
+
+  # ── Rol que asume GitHub Actions ───────────────────────────────────────
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'github-actions-${ProjectName}'
+      Description: !Sub 'Rol OIDC de GitHub Actions para ${GitHubOwner}/${GitHubRepo} (rama ${DeployBranch})'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/${DeployBranch}'
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: cloudformation }
+        - { Key: Component, Value: ci-cd }
+      Policies:
+        - PolicyName: terraform-state
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt TfStateBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${TfStateBucket.Arn}/*'
+        - PolicyName: workload-resources
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: Lambda
+                Effect: Allow
+                Action: lambda:*
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectName}-*'
+              - Sid: DynamoDB
+                Effect: Allow
+                Action: dynamodb:*
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectName}-*'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectName}-*/*'
+              - Sid: Logs
+                Effect: Allow
+                Action: logs:*
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-*:*'
+              - Sid: ReadOnlyGlobal
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - cloudwatch:DescribeAlarms
+                  - ce:ListCostAllocationTags
+                  - ce:UpdateCostAllocationTagsStatus
+                Resource: '*'
+              - Sid: SecretsMetadataOnly
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:RestoreSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:UntagResource
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:PutResourcePolicy
+                  - secretsmanager:DeleteResourcePolicy
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}/*'
+              - Sid: ReadTelegramSecretForWebhookRegistration
+                # Solo para el workflow manual telegram-webhook.yml (setWebhook).
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}/telegram-??????'
+              - Sid: ApiGatewayV2
+                Effect: Allow
+                Action:
+                  - apigateway:GET
+                  - apigateway:POST
+                  - apigateway:PUT
+                  - apigateway:PATCH
+                  - apigateway:DELETE
+                  - apigateway:TagResource
+                  - apigateway:UntagResource
+                Resource:
+                  - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis'
+                  - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis/*'
+                  - !Sub 'arn:aws:apigateway:${AWS::Region}::/tags/*'
+              - Sid: Scheduler
+                Effect: Allow
+                Action: scheduler:*
+                Resource:
+                  - !Sub 'arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${ProjectName}'
+                  - !Sub 'arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ProjectName}/*'
+              - Sid: Sns
+                Effect: Allow
+                Action: sns:*
+                Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-*'
+              - Sid: Alarms
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:ListTagsForResource
+                  - cloudwatch:TagResource
+                  - cloudwatch:UntagResource
+                Resource: !Sub 'arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ProjectName}-*'
+              - Sid: Budgets
+                Effect: Allow
+                Action:
+                  - budgets:ViewBudget
+                  - budgets:ModifyBudget
+                  - budgets:CreateBudgetAction
+                  - budgets:UpdateBudgetAction
+                  - budgets:DeleteBudgetAction
+                  - budgets:DescribeBudgetAction
+                  - budgets:DescribeBudgetActionsForBudget
+                  - budgets:ListTagsForResource
+                  - budgets:TagResource
+                  - budgets:UntagResource
+                Resource:
+                  - !Sub 'arn:aws:budgets::${AWS::AccountId}:budget/${ProjectName}-*'
+                  - !Sub 'arn:aws:budgets::${AWS::AccountId}:budget/${ProjectName}-*/action/*'
+        - PolicyName: iam-bounded
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CreateRolesOnlyWithBoundary
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePermissionsBoundary
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
+                Condition:
+                  ArnEquals:
+                    'iam:PermissionsBoundary': !Ref WorkloadBoundary
+              - Sid: ManageOwnRoles
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:DeleteRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRoleTags
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
+              - Sid: ManageOwnPolicies
+                Effect: Allow
+                Action:
+                  - iam:CreatePolicy
+                  - iam:DeletePolicy
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:ListPolicyVersions
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:TagPolicy
+                  - iam:UntagPolicy
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/${ProjectName}-*'
+              - Sid: PassOwnRolesToServices
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService':
+                      - lambda.amazonaws.com
+                      - scheduler.amazonaws.com
+                      - budgets.amazonaws.com
+              - Sid: NeverRemoveBoundary
+                Effect: Deny
+                Action: iam:DeleteRolePermissionsBoundary
+                Resource: '*'
+
+Outputs:
+  TfStateBucketName:
+    Value: !Ref TfStateBucket
+    Export:
+      Name: !Sub '${ProjectName}-tfstate-bucket'
+  GitHubActionsRoleArn:
+    Description: Valor para el secret AWS_ROLE_ARN del repo
+    Value: !GetAtt GitHubActionsRole.Arn
+  WorkloadBoundaryArn:
+    Description: Boundary obligatorio para los roles que cree Terraform
+    Value: !Ref WorkloadBoundary
