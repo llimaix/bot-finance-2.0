@@ -7,3 +7,4 @@ memory_size        = 256
 timeout            = 120
 log_retention_days = 30
 llm_provider       = "minimax"
+accounts_model     = "v1"

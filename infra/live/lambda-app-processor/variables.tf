@@ -42,3 +42,13 @@ variable "llm_provider" {
     error_message = "Debe ser anthropic o minimax."
   }
 }
+
+variable "accounts_model" {
+  description = "Modelo de cuentas: v1 (cuentas fijas del original) o v2 (cuentas dinámicas). Interruptor de la migración; se vuelve atrás poniendo v1."
+  type        = string
+
+  validation {
+    condition     = contains(["v1", "v2"], var.accounts_model)
+    error_message = "Debe ser v1 o v2."
+  }
+}

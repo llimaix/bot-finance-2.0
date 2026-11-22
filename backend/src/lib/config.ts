@@ -57,6 +57,14 @@ export const config = {
   get usdGtqRate() {
     return Number(process.env.USD_GTQ_RATE || '7.80');
   },
+  /**
+   * Interruptor del modelo de cuentas: 'v1' (cuentas fijas del original) o 'v2'
+   * (cuentas dinámicas, partida doble). Cualquier otro valor o ausencia → 'v1':
+   * el modo seguro es el que ya funciona.
+   */
+  get accountsModel(): 'v1' | 'v2' {
+    return process.env.ACCOUNTS_MODEL === 'v2' ? 'v2' : 'v1';
+  },
   /** Solo requerida cuando LLM_PROVIDER=minimax. */
   get minimaxApiKey() {
     return required('MINIMAX_API_KEY');
