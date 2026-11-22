@@ -9,6 +9,8 @@ import { loadProfile } from '../lib/profile';
 import { loadSecrets } from '../lib/secrets';
 import { sendMessage } from '../lib/telegram';
 import { alertasTarjetas, loadCiclos } from '../lib/v2/tarjetas';
+import { proximosIngresos } from '../lib/v2/ingresos';
+import { loadIngresos } from '../lib/v2/repo';
 import type { ScheduleEvent } from '../lib/types';
 
 const PRIMARY_MESSAGE =
@@ -59,8 +61,14 @@ export const handler = async (event: ScheduleEvent): Promise<void> => {
   if (event.kind === 'payday') {
     // Corre a diario; solo habla si MAÑANA es día de pago real (15 o fin de
     // mes, retrocedido a día hábil cuando cae en fin de semana).
-    const payday = nextPaydayAfter(today);
-    if (payday !== addDaysTo(today, 1)) {
+    // Modelo v2: el día de pago sale de los ingresos declarados (INC#), no del
+    // calendario fijo del original. Sin ingresos declarados no hay plan.
+    const manana = addDaysTo(today, 1);
+    const payday =
+      config.accountsModel === 'v2'
+        ? (proximosIngresos(await loadIngresos(), manana, 1)[0]?.fecha ?? null)
+        : nextPaydayAfter(today);
+    if (payday !== manana) {
       logger.info('checkpoint de quincena omitido: mañana no es día de pago', { date: today, proximoPago: payday });
       return;
     }
@@ -79,7 +87,8 @@ export const handler = async (event: ScheduleEvent): Promise<void> => {
             `Colchón de gasto variable (${input.colchonGastoVariable.dias} días): ${formatQ(input.colchonGastoVariable.total)}.`,
             `Sugerencia: al caer tu pago, aparta ${formatQ(input.sugerenciaApartarAlCaer)}. Detalle en /proyeccion y /metas.`,
           ].join('\n');
-    await sendMessage(config.allowedChatId, `💰 <b>Plan de quincena</b>\n\n${body}`);
+    const libre = config.accountsModel === 'v2' ? '\n\nMira cuánto te queda libre con /libre.' : '';
+    await sendMessage(config.allowedChatId, `💰 <b>Plan de quincena</b>\n\n${body}${libre}`);
     logger.info('checkpoint de quincena enviado', { date: today, coach: advice !== null });
     return;
   }
