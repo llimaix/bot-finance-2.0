@@ -6,6 +6,7 @@ import { fits, remainingMs } from '../deadline';
 import { logger } from '../logger';
 import { ACCOUNT_IDS, METHODS, TXN_TYPES } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
+import type { CrearCuentaInput, EditarCuentaInput, EntidadInput } from '../v2/config';
 import { getAgentModel, logUsage, stripThinking } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
 import { newCategorySchema, parsedTransactionSchema } from './schema';
@@ -53,6 +54,9 @@ const WRITE_TOOLS = new Set([
   'dia_sin_movimientos',
   'marcar_recurrente_pagado',
   'configurar_perfil',
+  'gestionar_entidad',
+  'crear_cuenta',
+  'editar_cuenta',
 ]);
 
 export const NO_WRITE_DISCLAIMER =
@@ -146,6 +150,10 @@ export interface AgentDeps {
   rememberFact: (dato: string) => Promise<unknown>;
   /** Cambia el nombre con el que el bot se dirige al usuario (perfil CFG#perfil). */
   setUserName: (nombre: string) => Promise<unknown>;
+  /** Modelo nuevo de cuentas (v2): guardan y envían el resumen con ↩️ Deshacer. */
+  manageEntity: (input: EntidadInput) => Promise<unknown>;
+  createAccount: (input: CrearCuentaInput) => Promise<unknown>;
+  editAccount: (input: EditarCuentaInput) => Promise<unknown>;
   searchMovements: (input: {
     desde: string;
     hasta: string;
@@ -304,6 +312,57 @@ export async function runAgent(
           'Cambia el nombre con el que te diriges al usuario, cuando lo pida explícitamente ("llámame Luis", "mi nombre es Ana", "dime Luis Fernando"). Solo el nombre, sin apodos inventados ni títulos. No lo uses para hechos financieros (eso es recordar_dato).',
         inputSchema: z.object({ nombre: z.string().min(1).max(40) }),
         execute: async ({ nombre }) => deps.setUserName(nombre),
+      }),
+
+      // ── Configuración de cuentas del MODELO NUEVO (v2) ──────────────────
+      gestionar_entidad: tool({
+        description:
+          'Registra un banco (entidad) o le agrega alias, para reconocerlo por cualquiera de sus nombres ("a BI también le digo el Industrial", "registra el banco BAC"). Guarda directamente; el sistema muestra un resumen con botón Deshacer.',
+        inputSchema: z.object({
+          nombre: z.string().min(1).max(60).describe('Nombre o alias del banco (existente o nuevo)'),
+          agregarAlias: z.array(z.string().min(1).max(40)).describe('Alias nuevos; [] si no hay'),
+        }),
+        execute: async (input) => deps.manageEntity(input),
+      }),
+
+      crear_cuenta: tool({
+        description:
+          'Configura una cuenta o tarjeta NUEVA del usuario en el modelo nuevo de cuentas ("agrega mi Visa BAC terminada en 1111, corta el 15, pago el 5, límite Q10,000"). Si el banco no existe, se registra solo. Guarda directamente; el sistema muestra un resumen con botón Deshacer. No sirve para registrar movimientos ni cambia las cuentas actuales del bot. Si es de crédito y falta corte, pago o límite, PREGUNTA antes de llamarla.',
+        inputSchema: z.object({
+          nombre: z.string().min(1).max(60).describe('Nombre visible, p. ej. "Visa BAC"'),
+          tipo: z.enum(['banco', 'credito', 'efectivo', 'billetera']).describe('banco = cuenta de débito o ahorro'),
+          entidad: z.string().nullable().describe('Banco, p. ej. "BAC"; null en efectivo'),
+          alias: z.array(z.string().min(1).max(40)).describe('Cómo la llama el usuario; [] si no dijo'),
+          terminaciones: z.array(z.string().regex(/^\d{4}$/)).describe('Últimos 4 dígitos de cada tarjeta; nunca el número completo'),
+          saldoActual: z.number().nullable().describe('Saldo en quetzales; en crédito, la DEUDA actual en positivo; null si no lo dijo'),
+          diaCorte: z.number().int().min(1).max(31).nullable(),
+          diaPago: z.number().int().min(1).max(31).nullable(),
+          limite: z.number().positive().nullable().describe('Límite de crédito en quetzales'),
+          tasaInteres: z.number().positive().nullable().describe('Tasa en porcentaje (3.5 = 3,5 %); opcional'),
+          periodoTasa: z.enum(['mensual', 'anual']).nullable(),
+        }),
+        execute: async (input) => deps.createAccount(input),
+      }),
+
+      editar_cuenta: tool({
+        description:
+          'Cambia una cuenta YA configurada en el modelo nuevo: nombre, alias, terminaciones, saldo, corte, pago, límite, tasa o cerrarla ("la 2222 también es de la Visa", "mi Visa ahora corta el 20"). Solo envía lo que cambia; el resto null o []. Guarda directamente; el sistema muestra un resumen con botón Deshacer.',
+        inputSchema: z.object({
+          cuenta: z.string().min(1).describe('Nombre, alias, id o terminación de la cuenta'),
+          nuevoNombre: z.string().min(1).max(60).nullable(),
+          agregarAlias: z.array(z.string().min(1).max(40)),
+          quitarAlias: z.array(z.string().min(1).max(40)),
+          agregarTerminaciones: z.array(z.string().regex(/^\d{4}$/)),
+          quitarTerminaciones: z.array(z.string().regex(/^\d{4}$/)),
+          saldoActual: z.number().nullable().describe('En crédito, la DEUDA actual en positivo'),
+          diaCorte: z.number().int().min(1).max(31).nullable(),
+          diaPago: z.number().int().min(1).max(31).nullable(),
+          limite: z.number().positive().nullable(),
+          tasaInteres: z.number().positive().nullable(),
+          periodoTasa: z.enum(['mensual', 'anual']).nullable(),
+          activa: z.boolean().nullable().describe('false para cerrar la cuenta (conserva su historial)'),
+        }),
+        execute: async (input) => deps.editAccount(input),
       }),
 
       buscar_movimientos: tool({

@@ -60,6 +60,10 @@ import {
 import { budgetMs, fits, remainingMs } from './deadline';
 import { logger } from './logger';
 import { changeUserName, currentUserName } from './profile';
+import type { ConfigSnapshot } from './v2/config';
+import { applyUndo } from './v2/repo';
+import { crearCuenta, editarCuenta, gestionarEntidad, loadSnapshot, renderConfig } from './v2/service';
+import type { ServiceResult } from './v2/service';
 import { buildReport } from './report';
 import { getSttProvider } from './stt';
 import { answerCallbackQuery, getFileBuffer, sendDocument, sendMessage, sendTyping } from './telegram';
@@ -295,20 +299,52 @@ function renderRecentSection(etiqueta: 'HOY' | 'AYER', fecha: string, movs: Read
   return `${header}\n${lines.join('\n')}`;
 }
 
+/** Envía el resumen de una configuración v2 con ↩️ Deshacer y devuelve al agente qué pasó. */
+async function sendConfigResult(chatId: number, result: ServiceResult): Promise<unknown> {
+  if (!result.ok) return { ok: false, errores: result.errors };
+  await sendMessage(chatId, result.html, {
+    keyboard: [[{ text: '↩️ Deshacer', callback_data: `und:${result.undoId}` }]],
+  });
+  return {
+    ok: true,
+    guardado: result.texto,
+    nota: 'El usuario ya recibió este resumen con un botón Deshacer. Confírmalo en una frase, sin repetir todos los datos.',
+  };
+}
+
+/** La configuración v2 no debe tumbar el turno del agente si falla al leerse. */
+async function loadConfigV2(): Promise<ConfigSnapshot> {
+  try {
+    return await loadSnapshot();
+  } catch (err) {
+    logger.error('no se pudo leer la configuración v2', { error: String(err) });
+    return { cuentas: [], entidades: [] };
+  }
+}
+
 async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {
   await sendTyping(chatId);
-  const [history, balances, cats, facts, recent] = await Promise.all([
+  const [history, balances, cats, facts, recent, configV2] = await Promise.all([
     getConversation(),
     loadBalances(today),
     listCategories(),
     listFacts(),
     queryRange(daysAgoGT(1), today),
+    loadConfigV2(),
   ]);
 
   const contextInfo = [
     `Cuentas (saldo actual): ${balances
       .map((b) => `${b.name} [id:${b.id}]: ${formatQ(b.balance)}${b.estimated ? ' (estimado)' : ''}`)
       .join('; ')}.`,
+    // Modelo nuevo (v2): solo configuración, para que editar_cuenta sepa qué existe.
+    `Cuentas configuradas en el modelo nuevo: ${
+      configV2.cuentas.length > 0
+        ? configV2.cuentas
+            .map((c) => `${c.nombre} [${c.tipo}${c.terminaciones.length ? `, ••${c.terminaciones.join('/••')}` : ''}${c.activa ? '' : ', cerrada'}]`)
+            .join('; ')
+        : 'ninguna todavía'
+    }.`,
     `Catálogo de categorías: ${cats.map((c) => c.name).join(', ')}.`,
     ...(facts.length > 0
       ? [`Hechos que el usuario te ha enseñado:\n${facts.map((f) => `- ${f.text}`).join('\n')}`]
@@ -369,6 +405,11 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     },
     // El nombre se valida en código (changeUserName), no se confía en el modelo.
     setUserName: async (nombre) => changeUserName(nombre),
+    // Modelo nuevo de cuentas: guardan directamente y el CÓDIGO envía el resumen
+    // de lo guardado con ↩️ Deshacer (el modelo solo lo confirma en una frase).
+    manageEntity: async (input) => sendConfigResult(chatId, await gestionarEntidad(input)),
+    createAccount: async (input) => sendConfigResult(chatId, await crearCuenta(input, today)),
+    editAccount: async (input) => sendConfigResult(chatId, await editarCuenta(input, today)),
     correctMovement: async ({ numero, fecha, cambios }) => {
       // Defensa en profundidad: el esquema ya exige > 0, pero `??` dejaría
       // pasar un 0 y un negativo invertiría los saldos.
@@ -816,6 +857,14 @@ async function handleCallback(callback: TelegramCallbackQuery): Promise<void> {
   const chatId = callback.from.id;
   const data = callback.data ?? '';
 
+  // ↩️ Deshacer una configuración del modelo nuevo (válido 24 h, una sola vez).
+  if (data.startsWith('und:')) {
+    const undone = await applyUndo(data.slice(4));
+    await answerCallbackQuery(callback.id, undone ? 'Deshecho ↩️' : 'Ya no se puede deshacer');
+    if (undone) await sendMessage(chatId, '↩️ Listo: dejé la configuración como estaba antes de ese cambio.');
+    return;
+  }
+
   if (data.startsWith('del:')) {
     const sk = data.slice(4);
     const txn = await getTransaction(sk);
@@ -902,6 +951,10 @@ async function handleCommand(chatId: number, today: string, command: Command): P
   switch (command.kind) {
     case 'ayuda':
       await sendMessage(chatId, HELP_TEXT);
+      return;
+
+    case 'cuentas':
+      await sendMessage(chatId, renderConfig(await loadSnapshot()));
       return;
 
     case 'nombre': {

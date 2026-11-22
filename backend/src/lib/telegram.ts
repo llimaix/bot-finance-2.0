@@ -130,7 +130,7 @@ const PARSE_ENTITIES_ERROR = /can't parse entities/i;
  * y devuelve las entidades a su carácter. Un "<monto>" mal escapado sobrevive
  * tal cual, que es justo lo que el mensaje quería mostrar.
  */
-function toPlainText(html: string): string {
+export function toPlainText(html: string): string {
   return html
     .replace(/<a\s[^>]*>([\s\S]*?)<\/a>/gi, '$1')
     .replace(new RegExp(`</?(?:${TELEGRAM_TAGS})(?:\\s[^>]*)?>`, 'gi'), '')
