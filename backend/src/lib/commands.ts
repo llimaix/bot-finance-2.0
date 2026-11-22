@@ -1,3 +1,4 @@
+import botCommands from './bot-commands.json';
 import { ACCOUNT_IDS } from './types';
 import type { AccountId, Method } from './types';
 
@@ -151,21 +152,9 @@ export const HELP_TEXT = [
   'Las categorías se organizan solas: si un movimiento no encaja en ninguna, el bot crea una nueva automáticamente.',
 ].join('\n');
 
-/** Menú de comandos que se registra en Telegram (setMyCommands) en cada deploy. */
-export const BOT_COMMANDS = [
-  { command: 'hoy', description: 'Movimientos del día' },
-  { command: 'semana', description: 'Resumen de los últimos 7 días' },
-  { command: 'mes', description: 'Resumen del mes en curso' },
-  { command: 'reporte', description: 'Reporte del mes con análisis' },
-  { command: 'nada', description: 'Registrar día sin movimientos' },
-  { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
-  { command: 'saldo', description: 'Saldos de tus cuentas' },
-  { command: 'proyeccion', description: 'Disponible proyectado a fin de mes' },
-  { command: 'metas', description: 'Metas de gasto por categoría' },
-  { command: 'costo', description: 'Costo de la IA este mes' },
-  { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
-  { command: 'memoria', description: 'Hechos que el agente aprendió de ti' },
-  { command: 'export', description: 'Exportar el mes en curso como CSV' },
-  { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
-  { command: 'ayuda', description: 'Cómo usar el bot' },
-] as const;
+/**
+ * Menú de comandos que se registra en Telegram (setMyCommands). Fuente única en
+ * bot-commands.json: también la lee scripts/set-webhook.mjs, que corre con Node
+ * sin dependencias y no puede importar TypeScript.
+ */
+export const BOT_COMMANDS: ReadonlyArray<{ command: string; description: string }> = botCommands;

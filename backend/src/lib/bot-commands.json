@@ -1,0 +1,17 @@
+[
+  { "command": "hoy", "description": "Movimientos del día" },
+  { "command": "semana", "description": "Resumen de los últimos 7 días" },
+  { "command": "mes", "description": "Resumen del mes en curso" },
+  { "command": "reporte", "description": "Reporte del mes con análisis" },
+  { "command": "nada", "description": "Registrar día sin movimientos" },
+  { "command": "categorias", "description": "Ver la base de conocimientos de categorías" },
+  { "command": "saldo", "description": "Saldos de tus cuentas" },
+  { "command": "proyeccion", "description": "Disponible proyectado a fin de mes" },
+  { "command": "metas", "description": "Metas de gasto por categoría" },
+  { "command": "costo", "description": "Costo de la IA este mes" },
+  { "command": "recurrentes", "description": "Gastos recurrentes aprendidos" },
+  { "command": "memoria", "description": "Hechos que el agente aprendió de ti" },
+  { "command": "export", "description": "Exportar el mes en curso como CSV" },
+  { "command": "borrar", "description": "Eliminar el movimiento #N de hoy" },
+  { "command": "ayuda", "description": "Cómo usar el bot" }
+]

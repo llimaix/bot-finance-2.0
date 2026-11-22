@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 /**
- * Registra el webhook del bot en Telegram. Idempotente: se ejecuta en cada
- * deploy (paso final del workflow) y también sirve manualmente.
+ * Registra el webhook del bot y su menú de comandos en Telegram. Idempotente:
+ * lo ejecuta el workflow manual telegram-webhook y también sirve en local.
  *
- * Resuelve la URL en este orden:
- *   1. argumento CLI:        node scripts/set-webhook.mjs https://xxxx.execute-api...
- *   2. env WEBHOOK_URL
- *   3. cdk-outputs.json      (generado por `cdk deploy --outputs-file cdk-outputs.json`)
+ * URL: argumento CLI (node scripts/set-webhook.mjs https://...) o env WEBHOOK_URL
+ * (el workflow la toma del output webhook_url del root api-gateway).
  *
  * Requiere env: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
  */
@@ -19,17 +17,9 @@ if (!token || !secret) {
   process.exit(1);
 }
 
-let url = process.argv[2] ?? process.env.WEBHOOK_URL;
+const url = process.argv[2] ?? process.env.WEBHOOK_URL;
 if (!url) {
-  try {
-    const outputs = JSON.parse(readFileSync('cdk-outputs.json', 'utf8'));
-    url = outputs.FinanzasStack?.WebhookUrl;
-  } catch {
-    // sin outputs file
-  }
-}
-if (!url) {
-  console.error('No encontré la URL del webhook (argumento, WEBHOOK_URL o cdk-outputs.json).');
+  console.error('No encontré la URL del webhook (argumento o WEBHOOK_URL).');
   process.exit(1);
 }
 
@@ -53,23 +43,9 @@ if (!data.ok) {
 }
 console.log(`✅ Webhook registrado: ${url}`);
 
-// Menú de comandos (autocompletado al escribir "/" en Telegram).
-// Mantener en sincronía con BOT_COMMANDS en src/lib/commands.ts.
-const commands = [
-  { command: 'hoy', description: 'Movimientos del día' },
-  { command: 'semana', description: 'Resumen de los últimos 7 días' },
-  { command: 'mes', description: 'Resumen del mes en curso' },
-  { command: 'reporte', description: 'Reporte del mes con análisis' },
-  { command: 'nada', description: 'Registrar día sin movimientos' },
-  { command: 'categorias', description: 'Ver la base de conocimientos de categorías' },
-  { command: 'saldo', description: 'Saldos de tus cuentas' },
-  { command: 'proyeccion', description: 'Disponible proyectado a fin de mes' },
-  { command: 'recurrentes', description: 'Gastos recurrentes aprendidos' },
-  { command: 'memoria', description: 'Hechos que el agente aprendió de ti' },
-  { command: 'export', description: 'Exportar el mes en curso como CSV' },
-  { command: 'borrar', description: 'Eliminar el movimiento #N de hoy' },
-  { command: 'ayuda', description: 'Cómo usar el bot' },
-];
+// Menú de comandos (autocompletado al escribir "/" en Telegram). Fuente única,
+// compartida con BOT_COMMANDS de src/lib/commands.ts.
+const commands = JSON.parse(readFileSync(new URL('../src/lib/bot-commands.json', import.meta.url), 'utf8'));
 
 const cmdRes = await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
   method: 'POST',
