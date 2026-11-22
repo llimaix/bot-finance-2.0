@@ -9,7 +9,7 @@ vi.mock('@aws-sdk/lib-dynamodb', async (importOriginal) => {
   return { ...actual, DynamoDBDocumentClient: { from: () => ({ send }) } };
 });
 
-const { appendConversation, putFact } = await import('../src/lib/dynamo');
+const { appendConversation, pk, putFact } = await import('../src/lib/dynamo');
 
 type Call = { name: string; input: Record<string, any> };
 const calls = (): Call[] =>
@@ -20,6 +20,7 @@ const msg = (text: string): ConversationMessage => ({ role: 'user', text, at: '2
 beforeEach(() => {
   send.mockReset();
   vi.stubEnv('TABLE_NAME', 'tabla-test');
+  vi.stubEnv('ALLOWED_CHAT_ID', '987654');
 });
 
 describe('appendConversation (escrituras concurrentes)', () => {
@@ -119,5 +120,22 @@ describe('putFact (límite con escrituras concurrentes)', () => {
     send.mockResolvedValueOnce({ Items: facts(50) });
     await expect(putFact(fact)).rejects.toThrow();
     expect(calls()[0]!.input.ConsistentRead).toBe(true);
+  });
+});
+
+describe('partición del usuario (PK)', () => {
+  it('sale del chat permitido, no de un valor fijo en el código', () => {
+    expect(pk()).toBe('USER#987654');
+    vi.stubEnv('ALLOWED_CHAT_ID', '111');
+    expect(pk()).toBe('USER#111');
+  });
+
+  it('las escrituras usan esa partición', async () => {
+    send.mockResolvedValueOnce({}).mockResolvedValueOnce({});
+    await appendConversation([msg('x')]);
+    for (const c of calls()) {
+      const key = c.input.Key ?? c.input.Item;
+      expect(key.PK).toBe('USER#987654');
+    }
   });
 });
