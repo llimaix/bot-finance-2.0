@@ -2,6 +2,7 @@ import { generateText, stepCountIs, tool } from 'ai';
 import { z } from 'zod';
 import { config } from '../config';
 import { weekdayGT } from '../dates';
+import { fits, remainingMs } from '../deadline';
 import { logger } from '../logger';
 import { ACCOUNT_IDS, METHODS, TXN_TYPES } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
@@ -12,6 +13,8 @@ import { newCategorySchema, parsedTransactionSchema } from './schema';
 // Tope TOTAL por defecto del loop del agente (varios pasos LLM + herramientas).
 // El webhook lo ajusta según la vía: texto (más holgado) vs voz (ya gastó en transcribir).
 const DEFAULT_AGENT_TIMEOUT_MS = 20_000;
+/** Timeout del reintento con empujón; solo se intenta si cabe en el presupuesto (M5). */
+const RETRY_TIMEOUT_MS = 60_000;
 
 /**
  * "Anuncio sin acción": los modelos razonadores a veces responden "espera un
@@ -357,7 +360,7 @@ export async function runAgent(
   const retryWith = async (nudge: string) => {
     result = await run(
       [...baseMessages, { role: 'assistant' as const, content: text }, { role: 'user' as const, content: nudge }],
-      60_000,
+      RETRY_TIMEOUT_MS,
     );
     logUsage('runAgent', config.llmModelAgent, result.totalUsage ?? result.usage, {
       steps: result.steps?.length,
@@ -372,7 +375,12 @@ export async function runAgent(
   // la red de seguridad DETERMINISTA en processing.ts, no un reintento a M3 —
   // reintentar producía disculpas confusas en consultas de lectura.)
   const emptyReply = stripThinking(result.text) === '' && registered.length === 0;
-  if ((!toolUsage([result]).usedAnyTool && ANNOUNCE_RE.test(text)) || emptyReply) {
+  const needsRetry = (!toolUsage([result]).usedAnyTool && ANNOUNCE_RE.test(text)) || emptyReply;
+  if (needsRetry && !fits(RETRY_TIMEOUT_MS)) {
+    // M5: el reintento no cabe antes del límite de la invocación. Mejor
+    // responder con el fallback que dejar que Lambda corte sin avisar.
+    logger.warn('reintento del agente omitido por falta de tiempo', { restanteMs: remainingMs(), emptyReply });
+  } else if (needsRetry) {
     logger.warn('agente sin respuesta útil: reintento con empujón', { userText, reply: text, emptyReply });
     try {
       await retryWith(

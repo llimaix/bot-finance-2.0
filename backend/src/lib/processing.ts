@@ -57,6 +57,7 @@ import {
   sumSpent,
   toCsv,
 } from './format';
+import { budgetMs, fits, remainingMs } from './deadline';
 import { logger } from './logger';
 import { buildReport } from './report';
 import { getSttProvider } from './stt';
@@ -68,6 +69,11 @@ import type {
   TelegramUpdate,
 } from './telegram';
 import type { Method, Transaction } from './types';
+
+/** Tope del agente por mensaje (MiniMax-M3 tiene picos de latencia largos). */
+const AGENT_TIMEOUT_MS = 90_000;
+/** Parser forzado de la red de seguridad (30s de LLM) + guardar y confirmar. */
+const SAFETY_NET_MS = 35_000;
 
 /**
  * Procesamiento del update de Telegram (corre en la Lambda processor, invocada
@@ -447,9 +453,11 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     },
   };
 
-  // Con la arquitectura asíncrona el presupuesto es holgado (processor: 180s).
-  // MiniMax-M3 razona largo: los picos de latencia superan los 45s.
-  const result = await withTyping(chatId, () => runAgent(userText, history, deps, { timeoutMs: 90_000 }));
+  // MiniMax-M3 razona largo: los picos de latencia superan los 45s. Hasta 90s,
+  // pero sin pasar del límite de la invocación (M5: la voz ya pudo gastar parte).
+  const result = await withTyping(chatId, () =>
+    runAgent(userText, history, deps, { timeoutMs: budgetMs(AGENT_TIMEOUT_MS) }),
+  );
 
   // ── Red de seguridad DETERMINISTA ────────────────────────────────────────
   // M3 llama la herramienta de registro de forma intermitente (~2 de 3): a
@@ -457,7 +465,14 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
   // registro y el agente NO ESCRIBIÓ NADA (ni corrigió/ajustó/marcó), lo
   // registramos con el parser forzado (100% confiable con M3). El control por
   // usedWriteTool evita doble-registrar cuando el agente corrigió/ajustó.
-  if (needsDeterministicRegister(result.usedWriteTool, userText)) {
+  const needsSafetyNet = needsDeterministicRegister(result.usedWriteTool, userText);
+  const safetyNetFits = fits(SAFETY_NET_MS);
+  if (needsSafetyNet && !safetyNetFits) {
+    // M5: sin tiempo para el parser forzado. El aviso de "no se guardó" de
+    // abajo sigue protegiendo si el agente afirmó un registro que no hizo.
+    logger.warn('red de seguridad omitida por falta de tiempo', { restanteMs: remainingMs() });
+  }
+  if (needsSafetyNet && safetyNetFits) {
     const outcome = await parseTransactions(userText).catch((err) => {
       logger.error('red de seguridad: parseo falló', { error: String(err) });
       return null;
