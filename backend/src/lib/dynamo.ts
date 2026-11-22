@@ -19,6 +19,7 @@ import type {
   ConversationMessage,
   Fact,
   ParsedTransaction,
+  Profile,
   RecurringRecord,
   Transaction,
 } from './types';
@@ -179,6 +180,24 @@ export async function deleteFact(id: string): Promise<void> {
   await doc.send(
     new DeleteCommand({ TableName: config.tableName, Key: { PK, SK: `FACT#${id}` } }),
   );
+}
+
+// ── Perfil del usuario (item CFG#perfil) ───────────────────────────────────
+
+export async function getProfile(): Promise<Profile | null> {
+  const res = await doc.send(
+    // Consistente: un cambio de nombre debe verse en el siguiente mensaje.
+    new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'CFG#perfil' }, ConsistentRead: true }),
+  );
+  if (!res.Item?.nombre) return null;
+  return { nombre: res.Item.nombre as string, actualizadoEn: res.Item.actualizadoEn as string };
+}
+
+export async function putProfile(profile: Profile): Promise<void> {
+  await doc.send(
+    new PutCommand({ TableName: config.tableName, Item: { PK, SK: 'CFG#perfil', ...profile } }),
+  );
+  logger.info('perfil actualizado', { longitudNombre: profile.nombre.length });
 }
 
 // ── Memoria conversacional corta (item CONV#main) ──────────────────────────

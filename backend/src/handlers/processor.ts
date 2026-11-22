@@ -2,6 +2,7 @@ import type { Context } from 'aws-lambda';
 import { setDeadline } from '../lib/deadline';
 import { logger } from '../lib/logger';
 import { processUpdate } from '../lib/processing';
+import { loadProfile } from '../lib/profile';
 import { loadSecrets } from '../lib/secrets';
 import { sendMessage } from '../lib/telegram';
 import type { TelegramUpdate } from '../lib/telegram';
@@ -22,6 +23,7 @@ const TIMEOUT_NOTICE =
  */
 export const handler = async (event: { update: TelegramUpdate }, context: Context): Promise<void> => {
   await loadSecrets();
+  await loadProfile();
 
   const remaining = context.getRemainingTimeInMillis();
   setDeadline(Date.now() + remaining - RESERVE_MS);
