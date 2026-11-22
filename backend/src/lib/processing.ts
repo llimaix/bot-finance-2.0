@@ -204,6 +204,18 @@ async function route(message: TelegramMessage): Promise<void> {
     const image = await getFileBuffer(fileId);
     const outcome = await withTyping(chatId, () => parseReceipt(image, mediaType, message.caption ?? null));
 
+    // Modelo v2: lo leído pasa por el agente como texto. Así la terminación
+    // ("terminada en 1111") la resuelve el código, y si no se conoce o falta
+    // la cuenta, el agente pregunta y la aprende (mismo flujo que el texto).
+    if (config.accountsModel === 'v2') {
+      if (outcome.transactions.length === 0) {
+        await sendMessage(chatId, '🧾 No pude leer movimientos en la imagen. ¿Me cuentas el monto y qué fue en texto?');
+        return;
+      }
+      await agentFlow(chatId, today, describeReceiptForAgent(outcome, message.caption ?? null, today));
+      return;
+    }
+
     // Auditoría: lo que la visión leyó queda en el movimiento (responde "¿qué leíste?")
     const vision =
       outcome.transactions.map((t) => `${t.description} Q${t.amount}${t.date !== today ? ` (${t.date})` : ''}`).join('; ') ||
@@ -323,6 +335,24 @@ async function loadConfigV2(): Promise<ConfigSnapshot> {
     logger.error('no se pudo leer la configuración v2', { error: String(err) });
     return { cuentas: [], entidades: [] };
   }
+}
+
+/**
+ * Modelo v2: la lectura de la visión convertida en mensaje para el agente. La
+ * terminación va con su contexto ("terminada en 1111") para que el resolvedor
+ * la imponga como cualquier otra terminación escrita por el usuario.
+ */
+function describeReceiptForAgent(outcome: ParseOutcome, caption: string | null, today: string): string {
+  const lineas = outcome.transactions.map(
+    (t) => `- ${t.type} de ${formatQ(t.amount)}: ${t.description} (categoría ${t.category})${t.date !== today ? `, fecha ${t.date}` : ''}`,
+  );
+  return [
+    '📷 Comprobante enviado por foto. La lectura de la imagen dice:',
+    ...lineas,
+    ...(outcome.terminacion ? [`Pagado con la tarjeta terminada en ${outcome.terminacion}.`] : []),
+    ...(caption ? [`Lo que escribió el usuario con la foto: "${caption}".`] : []),
+    'Regístralo con registrar_movimientos (si no se sabe la cuenta, pregunta).',
+  ].join('\n');
 }
 
 async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {

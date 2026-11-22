@@ -92,3 +92,14 @@ export function resolverCuenta(
 
   return { tipo: 'ninguna' };
 }
+
+/**
+ * Terminación leída de una imagen → exactamente 4 dígitos o null. Si la visión
+ * leyó más dígitos, solo se conservan los 4 últimos: nunca se guarda ni se usa
+ * un número de tarjeta más largo.
+ */
+export function cleanTerminacion(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : null;
+}

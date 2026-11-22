@@ -41,3 +41,12 @@ export const parseResultSchema = z.object({
   // Categorías que el modelo inventó para este mensaje (vacío normalmente).
   newCategories: z.array(newCategorySchema),
 });
+
+/**
+ * Comprobantes e imágenes: además, la terminación de la tarjeta si se ve como
+ * número enmascarado. Texto libre a propósito (los structured outputs no
+ * garantizan patrones): el código la limpia con cleanTerminacion.
+ */
+export const receiptResultSchema = parseResultSchema.extend({
+  terminacion: z.string().nullable(),
+});
