@@ -130,10 +130,18 @@ export interface RegisteredBatch {
   totalSpentToday: number;
   /** Escudos: posibles duplicados o montos inusuales (menciónalos al usuario). */
   advertencias: string[];
+  /** Modelo v2: problemas por los que NO se guardó nada (el agente pregunta). */
+  errores?: string[];
 }
 
 export interface AgentDeps {
   today: string;
+  /**
+   * Solo en modo v2 (ACCOUNTS_MODEL=v2): ids de las cuentas activas del modelo
+   * nuevo. Con ellos, registrar_movimientos pide origen/destino acotados a
+   * esas cuentas (el modelo no puede inventar una).
+   */
+  cuentasV2Ids?: string[];
   /** Cuentas con saldos + catálogo + hechos aprendidos, formateado para el system prompt. */
   contextInfo: string;
   register: (input: {
@@ -199,10 +207,25 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const registered: Transaction[] = [];
 
+  // Modelo v2: cada movimiento lleva origen/destino acotados a las cuentas
+  // reales. El cast mantiene el tipo de v1 para el resto del código; los campos
+  // extra llegan intactos a register (materializeParsed los conserva).
+  const idsV2 = deps.cuentasV2Ids;
+  const cuentaRef = idsV2 && idsV2.length > 0 ? z.enum(idsV2 as [string, ...string[]]) : z.string();
+  const txnSchema = (
+    idsV2
+      ? parsedTransactionSchema.extend({
+          origen: cuentaRef.nullable().describe('id de la cuenta de donde SALE el dinero; null = de fuera'),
+          destino: cuentaRef.nullable().describe('id de la cuenta a donde ENTRA el dinero; null = hacia fuera'),
+        })
+      : parsedTransactionSchema
+  ) as typeof parsedTransactionSchema;
+
   const system = buildAgentSystemPrompt({
     today: deps.today,
     weekday: weekdayGT(),
     contextInfo: deps.contextInfo,
+    accountsModel: idsV2 ? 'v2' : 'v1',
   });
   const baseMessages = [
     ...history.map((m) => ({ role: m.role, content: m.text })),
@@ -211,13 +234,24 @@ export async function runAgent(
   const agentTools = {
       registrar_movimientos: tool({
         description:
-          'Registra movimientos de dinero NUEVOS del usuario (gastos, ingresos, retiros, depósitos, transferencias). NO la uses para movimientos que ya aparecen en el contexto o la conversación, ni cuando el usuario está cuadrando/reconciliando sus cuentas: ahí corresponde consultar, corregir o eliminar. Declara en newCategories cualquier categoría nueva que uses.',
+          'Registra movimientos de dinero NUEVOS del usuario (gastos, ingresos, retiros, depósitos, transferencias). NO la uses para movimientos que ya aparecen en el contexto o la conversación, ni cuando el usuario está cuadrando/reconciliando sus cuentas: ahí corresponde consultar, corregir o eliminar. Declara en newCategories cualquier categoría nueva que uses.' +
+          (deps.cuentasV2Ids
+            ? ' MODELO NUEVO: indica origen (cuenta de donde SALE el dinero) y destino (a donde ENTRA) con los ids de "Cuentas configuradas en el modelo nuevo"; null = fuera de tus cuentas. El campo method se ignora. Si no sabes la cuenta, PREGUNTA antes de registrar.'
+            : ''),
         inputSchema: z.object({
-          transactions: z.array(parsedTransactionSchema).min(1),
+          transactions: z.array(txnSchema).min(1),
           newCategories: z.array(newCategorySchema),
         }),
         execute: async (input) => {
           const batch = await deps.register(input);
+          if (batch.errores && batch.errores.length > 0) {
+            // No se guardó NADA: el agente pregunta lo que falta y vuelve a registrar.
+            return {
+              ok: false,
+              errores: batch.errores,
+              nota: 'No se registró ningún movimiento. Pregunta al usuario lo que falta (en una sola pregunta corta) y después vuelve a llamar esta herramienta.',
+            };
+          }
           registered.push(...batch.txns);
           return {
             ok: true,

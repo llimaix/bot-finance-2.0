@@ -122,7 +122,18 @@ export interface AgentPromptContext {
   weekday: string;
   /** Cuentas con saldo actual + catálogo de categorías, ya formateados. */
   contextInfo: string;
+  /** Modelo de cuentas activo; en v2 se añaden las reglas de origen/destino. */
+  accountsModel?: 'v1' | 'v2';
 }
+
+/** Reglas del modelo nuevo de cuentas (partida doble). Solo con ACCOUNTS_MODEL=v2. */
+const V2_ACCOUNT_RULES = `MODELO NUEVO DE CUENTAS (activo): IGNORA la "Regla de CUENTAS" y el campo method de arriba. Las cuentas del usuario son las de "Cuentas configuradas en el modelo nuevo" (usa sus ids). En registrar_movimientos indica de dónde SALE y a dónde ENTRA el dinero:
+- Gasto: origen = la cuenta con la que pagó; destino = null.
+- Ingreso: origen = null; destino = la cuenta donde entró.
+- Pago de tarjeta: tipo transferencia; origen = la cuenta desde la que pagó; destino = la tarjeta.
+- Retiro en cajero: transferencia; origen = la cuenta de banco; destino = efectivo. Depósito de efectivo: al revés.
+- Entre cuentas propias: transferencia con origen y destino.
+Si el usuario menciona una terminación ("termina en 1111") o un alias, el sistema la resuelve. Si no sabes la cuenta, PREGUNTA antes de registrar. Si registrar_movimientos devuelve errores, NO se guardó nada: haz una sola pregunta corta con lo que falta y vuelve a registrar.`;
 
 /** System prompt del AGENTE conversacional (tool loop del webhook). */
 function agentBase(ctx: AgentPromptContext): string {
@@ -236,7 +247,8 @@ const withUser = (base: string): string => `${base}\n\n${userLine()}`;
 export const buildParseSystemPrompt = (ctx: PromptContext): string => withUser(parseBase(ctx));
 export const buildReceiptSystemPrompt = (ctx: PromptContext): string => withUser(receiptBase(ctx));
 export const buildCorrectSystemPrompt = (ctx: PromptContext): string => withUser(correctBase(ctx));
-export const buildAgentSystemPrompt = (ctx: AgentPromptContext): string => withUser(agentBase(ctx));
+export const buildAgentSystemPrompt = (ctx: AgentPromptContext): string =>
+  withUser(ctx.accountsModel === 'v2' ? `${agentBase(ctx)}\n\n${V2_ACCOUNT_RULES}` : agentBase(ctx));
 export const answerSystemPrompt = (): string => withUser(ANSWER_BASE);
 export const coachWeeklySystemPrompt = (): string => withUser(COACH_WEEKLY_BASE);
 export const coachPaydaySystemPrompt = (): string => withUser(COACH_PAYDAY_BASE);
