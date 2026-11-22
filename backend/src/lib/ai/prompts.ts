@@ -245,7 +245,12 @@ export function userLine(name: string | null = currentUserName()): string {
 const withUser = (base: string): string => `${base}\n\n${userLine()}`;
 
 export const buildParseSystemPrompt = (ctx: PromptContext): string => withUser(parseBase(ctx));
-export const buildReceiptSystemPrompt = (ctx: PromptContext): string => withUser(receiptBase(ctx));
+/** Terminación de la tarjeta en imágenes (diseño, sección 4.1). */
+const RECEIPT_TERMINACION = `La imagen también puede ser una captura de la wallet del teléfono, de la app del banco o de una notificación de cobro: extrae el movimiento igual.
+- terminacion: los últimos 4 dígitos de la tarjeta SOLO si aparecen como número de tarjeta enmascarado ("•••• 1111", "**** 1111", "XXXX1111", "terminada en 1111"). NUNCA los tomes de montos, fechas, teléfonos, números de autorización, referencias ni NIT. Si no se ve, null.`;
+
+export const buildReceiptSystemPrompt = (ctx: PromptContext): string =>
+  withUser(`${receiptBase(ctx)}\n\n${RECEIPT_TERMINACION}`);
 export const buildCorrectSystemPrompt = (ctx: PromptContext): string => withUser(correctBase(ctx));
 export const buildAgentSystemPrompt = (ctx: AgentPromptContext): string =>
   withUser(ctx.accountsModel === 'v2' ? `${agentBase(ctx)}\n\n${V2_ACCOUNT_RULES}` : agentBase(ctx));

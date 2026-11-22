@@ -19,7 +19,8 @@ import {
   buildReceiptSystemPrompt,
 } from './prompts';
 import type { PromptContext } from './prompts';
-import { parseResultSchema, parsedTransactionSchema } from './schema';
+import { parseResultSchema, parsedTransactionSchema, receiptResultSchema } from './schema';
+import { cleanTerminacion } from '../v2/resolver';
 
 // Topes TOTALES por llamada (incluyen los reintentos del SDK). Con la
 // arquitectura asíncrona corren en el processor (180s): holgados a propósito.
@@ -82,6 +83,8 @@ export interface ParseOutcome {
   createdCategories: Array<{ name: string; emoji: string }>;
   /** Mapa nombre→emoji del catálogo (incluidas las recién creadas), para denormalizar. */
   categoryEmoji: Map<string, string>;
+  /** Solo imágenes: últimos 4 dígitos de la tarjeta, si se ven enmascarados. */
+  terminacion?: string | null;
 }
 
 async function loadPromptContext(): Promise<{ ctx: PromptContext; catalog: CategoryRecord[]; known: Map<string, CategoryRecord> }> {
@@ -196,11 +199,11 @@ export async function parseReceipt(
         ],
       },
     ],
-    schema: parseResultSchema,
+    schema: receiptResultSchema,
     timeout: VISION_TIMEOUT_MS,
   });
 
-  const outcome = toOutcome(raw, catalog, known, ctx.today);
+  const outcome: ParseOutcome = { ...toOutcome(raw, catalog, known, ctx.today), terminacion: cleanTerminacion(raw.terminacion) };
   logger.info('comprobante procesado', {
     caption,
     imageBytes: image.length,
