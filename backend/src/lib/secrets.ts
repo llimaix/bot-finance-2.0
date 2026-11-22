@@ -56,9 +56,12 @@ async function hydrate(client: SecretsManagerClient): Promise<void> {
       }
 
       for (const [key, target] of Object.entries(keys)) {
+        // trim: un espacio o salto de línea pegado en la consola no debe
+        // romper la comparación del chat ni la autenticación del webhook.
         const value = values[key];
-        if (typeof value === 'string' && value !== '' && !process.env[target]) {
-          process.env[target] = value;
+        const clean = typeof value === 'string' ? value.trim() : '';
+        if (clean !== '' && !process.env[target]) {
+          process.env[target] = clean;
         }
       }
     }),
