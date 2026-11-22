@@ -65,6 +65,8 @@ import type { ConfigSnapshot } from './v2/config';
 import { toCents } from './v2/money';
 import { applyUndo } from './v2/repo';
 import { loadCiclos, renderTarjetas } from './v2/tarjetas';
+import { proximosIngresos } from './v2/ingresos';
+import { calcularLibre, renderLibre } from './v2/libre';
 import { loadBalancesV2, renderAffectedV2, renderSaldosV2 } from './v2/saldos';
 import { planRegistroV2 } from './v2/registro';
 import type { PropuestaV2 } from './v2/registro';
@@ -1026,6 +1028,28 @@ async function handleCommand(chatId: number, today: string, command: Command): P
     case 'ayuda':
       await sendMessage(chatId, HELP_TEXT);
       return;
+
+    case 'libre': {
+      if (config.accountsModel !== 'v2') {
+        await sendMessage(chatId, '"Libre" está disponible en el modelo nuevo de cuentas.');
+        return;
+      }
+      const [{ saldos }, { tarjetas }, ingresos, data] = await Promise.all([
+        loadBalancesV2(today),
+        loadCiclos(today),
+        loadIngresos(),
+        loadAdvisorData(today, daysInMonth(monthPrefixGT(0))),
+      ]);
+      // Gasto variable: promedio diario de los gastos del mes (modelo v2).
+      const gastoMes = data.monthTxns.reduce((a, t) => a + (t.v2?.tipo === 'gasto' ? t.v2.montoCentavos : 0), 0);
+      const gastoDiario = data.daysElapsed > 0 ? Math.round(gastoMes / data.daysElapsed) : 0;
+      const recurrentes = data.recurrentes
+        .filter((r) => r.tipo === 'gasto' && r.estado === 'confirmado')
+        .map((r) => ({ descripcion: r.descripcion, montoCentavos: toCents(r.montoTipico), dia: r.diaTipicoDePago, aunVieneEsteMes: r.aunVieneEsteMes }));
+      const libre = calcularLibre({ hoy: today, saldos, tarjetas, proximos: proximosIngresos(ingresos, today), recurrentes, gastoDiarioCentavos: gastoDiario });
+      await sendMessage(chatId, renderLibre(libre, gastoDiario));
+      return;
+    }
 
     case 'tarjetas':
       await sendMessage(
