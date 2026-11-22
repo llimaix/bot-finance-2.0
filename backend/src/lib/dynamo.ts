@@ -556,14 +556,16 @@ export async function deleteTransaction(sk: string): Promise<void> {
 /** Actualiza solo los campos regenerados por una corrección; conserva SK/shortId/rawMessage/createdAt. */
 export async function updateTransactionFields(
   sk: string,
-  fields: ParsedTransaction & { emoji: string },
+  fields: ParsedTransaction & { emoji: string; v2?: TransactionV2 },
 ): Promise<void> {
   await doc.send(
     new UpdateCommand({
       TableName: config.tableName,
       Key: { PK: pk(), SK: sk },
+      // Modelo v2: el campo v2 (la verdad de los saldos) se actualiza junto con los derivados.
       UpdateExpression:
-        'SET amount = :amount, #type = :type, category = :category, #method = :method, description = :description, emoji = :emoji',
+        'SET amount = :amount, #type = :type, category = :category, #method = :method, description = :description, emoji = :emoji' +
+        (fields.v2 ? ', v2 = :v2' : ''),
       ExpressionAttributeNames: { '#type': 'type', '#method': 'method' },
       ExpressionAttributeValues: {
         ':amount': fields.amount,
@@ -572,6 +574,7 @@ export async function updateTransactionFields(
         ':method': fields.method,
         ':description': fields.description,
         ':emoji': fields.emoji,
+        ...(fields.v2 ? { ':v2': fields.v2 } : {}),
       },
     }),
   );
