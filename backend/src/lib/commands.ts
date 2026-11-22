@@ -18,6 +18,7 @@ export type Command =
   | { kind: 'costo' }
   | { kind: 'borrar'; shortId: number | null }
   | { kind: 'nombre'; name: string | null }
+  | { kind: 'cuentas' }
   | { kind: 'ayuda' };
 
 export type MetasAction =
@@ -27,7 +28,7 @@ export type MetasAction =
   | { op: 'quitar'; category: string };
 
 const COMMAND_RE =
-  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|costo|borrar|nombre|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|costo|borrar|nombre|cuentas|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -88,6 +89,8 @@ export function matchCommand(text: string): Command | null {
     case 'nombre':
       // Sin argumento: muestra el nombre actual. La validación vive en profile.ts.
       return { kind: 'nombre', name: arg ? arg : null };
+    case 'cuentas':
+      return { kind: 'cuentas' };
     default:
       // /start, /help, /ayuda
       return { kind: 'ayuda' };
@@ -151,6 +154,7 @@ export const HELP_TEXT = [
   '/export — el mes en curso como archivo CSV',
   '/borrar N — elimina el movimiento #N de hoy',
   '/nombre — cómo te llamo (cámbialo con: /nombre Luis)',
+  '/cuentas — tus bancos, cuentas y tarjetas del modelo nuevo (configúralas hablando conmigo)',
   '',
   'También puedes: mandar la 📸 foto de un ticket (con caption opcional), decir "ayer gasté..." para fechas pasadas, PREGUNTAR ("¿cuánto tengo?", "¿cuánto llevo en comida?") y corregir con "corrige #2 eran Q50".',
   '',

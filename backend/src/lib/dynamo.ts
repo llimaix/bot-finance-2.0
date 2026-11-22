@@ -560,3 +560,34 @@ export async function updateTransactionFields(
     }),
   );
 }
+
+// ── Acceso genérico por SK (modelo v2: CTA#, BNK#, UNDO#) ───────────────────
+// Siempre bajo la partición del usuario (pk()). Lecturas consistentes: el
+// resumen que ve el usuario debe reflejar lo recién guardado.
+
+export async function queryItemsByPrefix(prefix: string): Promise<Record<string, unknown>[]> {
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: config.tableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': pk(), ':prefix': prefix },
+      ConsistentRead: true,
+    }),
+  );
+  return (res.Items ?? []) as Record<string, unknown>[];
+}
+
+export async function getItemBySk(sk: string): Promise<Record<string, unknown> | null> {
+  const res = await doc.send(
+    new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: sk }, ConsistentRead: true }),
+  );
+  return (res.Item as Record<string, unknown> | undefined) ?? null;
+}
+
+export async function putItemBySk(sk: string, attrs: Record<string, unknown>): Promise<void> {
+  await doc.send(new PutCommand({ TableName: config.tableName, Item: { ...attrs, PK: pk(), SK: sk } }));
+}
+
+export async function deleteItemBySk(sk: string): Promise<void> {
+  await doc.send(new DeleteCommand({ TableName: config.tableName, Key: { PK: pk(), SK: sk } }));
+}
