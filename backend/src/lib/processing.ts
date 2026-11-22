@@ -64,6 +64,7 @@ import { changeUserName, currentUserName } from './profile';
 import type { ConfigSnapshot } from './v2/config';
 import { toCents } from './v2/money';
 import { applyUndo } from './v2/repo';
+import { loadCiclos, renderTarjetas } from './v2/tarjetas';
 import { loadBalancesV2, renderAffectedV2, renderSaldosV2 } from './v2/saldos';
 import { planRegistroV2 } from './v2/registro';
 import type { PropuestaV2 } from './v2/registro';
@@ -1023,6 +1024,15 @@ async function handleCommand(chatId: number, today: string, command: Command): P
   switch (command.kind) {
     case 'ayuda':
       await sendMessage(chatId, HELP_TEXT);
+      return;
+
+    case 'tarjetas':
+      await sendMessage(
+        chatId,
+        config.accountsModel === 'v2'
+          ? renderTarjetas((await loadCiclos(today)).tarjetas, today)
+          : 'Los ciclos de tarjeta están disponibles en el modelo nuevo de cuentas.',
+      );
       return;
 
     case 'cuentas':

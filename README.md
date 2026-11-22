@@ -74,7 +74,7 @@ Roots de Terraform, en orden de aplicación: `dynamodb`, `secrets`, `lambda-app-
 | Preguntar | "¿cuánto gasté en farmacia en mayo?", "¿me alcanza para…?" |
 | Enseñarle algo | "mi salario cae el 15 y el 29" (se ve en `/memoria`) |
 
-**Comandos:** `/hoy`, `/semana`, `/mes`, `/reporte`, `/nada`, `/categorias`, `/saldo`, `/proyeccion`, `/metas`, `/costo`, `/recurrentes`, `/memoria`, `/export`, `/borrar`, `/nombre`, `/cuentas`, `/ayuda`.
+**Comandos:** `/hoy`, `/semana`, `/mes`, `/reporte`, `/nada`, `/categorias`, `/saldo`, `/proyeccion`, `/metas`, `/costo`, `/recurrentes`, `/memoria`, `/export`, `/borrar`, `/nombre`, `/cuentas`, `/tarjetas`, `/ayuda`.
 
 Detalle completo y diferencias con el original: `docs/funcionalidad-fork.md`.
 
