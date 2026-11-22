@@ -62,6 +62,7 @@ import { budgetMs, fits, remainingMs } from './deadline';
 import { logger } from './logger';
 import { changeUserName, currentUserName } from './profile';
 import type { ConfigSnapshot } from './v2/config';
+import { toCents } from './v2/money';
 import { applyUndo } from './v2/repo';
 import { loadBalancesV2, renderAffectedV2, renderSaldosV2 } from './v2/saldos';
 import { planRegistroV2 } from './v2/registro';
@@ -254,7 +255,9 @@ async function route(message: TelegramMessage): Promise<void> {
     return;
   }
 
-  const correction = matchCorrection(text);
+  // Modelo v2: "corrige #N" pasa por el agente (corregir_movimiento mantiene
+  // v2); la corrección directa de v1 no conoce origen/destino.
+  const correction = config.accountsModel === 'v1' ? matchCorrection(text) : null;
   if (correction) {
     const sent = await handleCorrection(chatId, today, correction.shortId, correction.text);
     await rememberExchange(text, sent);
@@ -465,6 +468,15 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       const date = fecha ?? today;
       const txn = await findByShortId(date, numero);
       if (!txn) return { ok: false, error: `No existe el movimiento #${numero} del ${date}` };
+      // Modelo v2: la cuenta y el tipo viven en origen/destino; cambiarlos aquí
+      // descuadraría los saldos. Se elimina y se registra de nuevo.
+      if (txn.v2 && (cambios.tipo !== null || cambios.metodo !== null)) {
+        return {
+          ok: false,
+          error:
+            'En el modelo nuevo, para cambiar la cuenta o el tipo: elimina el movimiento con eliminar_movimiento y regístralo de nuevo con la cuenta correcta.',
+        };
+      }
 
       let category = txn.category;
       let emoji = txn.emoji ?? '🏷️';
@@ -488,7 +500,12 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
         method: cambios.metodo ?? txn.method,
         description: cambios.descripcion ?? txn.description,
       };
-      await updateTransactionFields(txn.sk, { ...fields, emoji });
+      await updateTransactionFields(txn.sk, {
+        ...fields,
+        emoji,
+        // v2: el monto que usan los saldos se corrige junto con el derivado.
+        ...(txn.v2 ? { v2: { ...txn.v2, montoCentavos: toCents(fields.amount) } } : {}),
+      });
       return {
         ok: true,
         antes: { monto: txn.amount, tipo: txn.type, categoria: txn.category, metodo: txn.method, descripcion: txn.description },
