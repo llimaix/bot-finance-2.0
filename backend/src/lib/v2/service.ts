@@ -11,7 +11,9 @@ import {
   resumenEntidad,
 } from './config';
 import type { ConfigSnapshot, CrearCuentaInput, EditarCuentaInput, EntidadInput } from './config';
-import { cuentaWrite, entidadWrite, loadSnapshot, saveWithUndo } from './repo';
+import { planIngreso, resumenIngreso } from './ingresos';
+import type { IngresoEsperado, IngresoInput } from './ingresos';
+import { cuentaWrite, entidadWrite, ingresoWrite, loadIngresos, loadSnapshot, saveWithUndo } from './repo';
 
 export type ServiceResult =
   | { ok: true; html: string; texto: string; undoId: string }
@@ -66,8 +68,17 @@ export async function gestionarEntidad(input: EntidadInput): Promise<ServiceResu
   return done(html, undoId);
 }
 
+export async function configurarIngreso(input: IngresoInput): Promise<ServiceResult> {
+  const [snap, ingresos] = await Promise.all([loadSnapshot(), loadIngresos()]);
+  const plan = planIngreso(input, snap, ingresos);
+  if (!plan.ok) return plan;
+  const undoId = await saveWithUndo([ingresoWrite(plan.despues, plan.antes)]);
+  const html = [plan.antes ? '✅ <b>Ingreso actualizado</b>' : '✅ <b>Ingreso esperado guardado</b>', '', resumenIngreso(plan.despues, snap)].join('\n');
+  return done(html, undoId);
+}
+
 /** Listado para /cuentas. */
-export function renderConfig(snap: ConfigSnapshot): string {
+export function renderConfig(snap: ConfigSnapshot, ingresos: ReadonlyArray<IngresoEsperado> = []): string {
   if (snap.cuentas.length === 0 && snap.entidades.length === 0) {
     return [
       '🏦 Aún no hay cuentas en el modelo nuevo.',
@@ -81,7 +92,8 @@ export function renderConfig(snap: ConfigSnapshot): string {
     '',
     ...activas.map((c) => resumenCuenta(c, snap.entidades)).join('\n\n').split('\n'),
     ...(snap.entidades.length > 0 ? ['', '<b>Bancos</b>', ...snap.entidades.map(resumenEntidad)] : []),
+    ...(ingresos.length > 0 ? ['', '<b>Ingresos esperados</b>', ...ingresos.map((i) => resumenIngreso(i, snap))] : []),
   ].join('\n');
 }
 
-export { loadSnapshot };
+export { loadIngresos, loadSnapshot };

@@ -10,6 +10,8 @@ import { logger } from '../logger';
 import type { ConfigSnapshot } from './config';
 import { cuentaSchema, entidadSchema } from './model';
 import type { Cuenta, EntidadBancaria } from './model';
+import { ingresoSchema } from './ingresos';
+import type { IngresoEsperado } from './ingresos';
 
 export const UNDO_TTL_MS = 24 * 3600 * 1000;
 
@@ -81,4 +83,22 @@ export async function applyUndo(undoId: string): Promise<boolean> {
   await deleteItemBySk(sk);
   logger.info('configuración deshecha', { undoId, items: ops.length });
   return true;
+}
+
+// ── Ingresos esperados (INC#<slug>) ────────────────────────────────────────
+
+export const ingresoSk = (slug: string): string => `INC#${slug}`;
+
+export async function loadIngresos(): Promise<IngresoEsperado[]> {
+  const ingresos: IngresoEsperado[] = [];
+  for (const raw of await queryItemsByPrefix('INC#')) {
+    const parsed = ingresoSchema.safeParse(withoutKeys(raw));
+    if (parsed.success) ingresos.push(parsed.data);
+    else logger.error('ingreso esperado inválido en la tabla', { sk: raw.SK });
+  }
+  return ingresos;
+}
+
+export function ingresoWrite(ingreso: IngresoEsperado, previous: IngresoEsperado | null): Write {
+  return { sk: ingresoSk(ingreso.slug), value: { ...ingreso }, previous: previous ? { ...previous } : null };
 }
