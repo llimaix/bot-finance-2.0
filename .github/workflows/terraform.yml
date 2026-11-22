@@ -115,6 +115,9 @@ jobs:
       - id: plan
         env:
           ROOTS: ${{ needs.detect.outputs.roots }}
+          # Datos personales: nunca en tfvars (repo público). Solo los roots que
+          # declaran la variable la usan; Terraform ignora el resto.
+          TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
         run: |
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/plans"
