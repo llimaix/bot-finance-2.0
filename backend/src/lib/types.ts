@@ -65,6 +65,20 @@ export interface Transaction extends ParsedTransaction {
   /** Texto original completo o transcripción */
   rawMessage: string;
   createdAt: string;
+  /**
+   * Modelo de cuentas v2 (partida doble en centavos). Presente solo en los
+   * movimientos registrados con ACCOUNTS_MODEL=v2; los campos v1 de arriba se
+   * derivan de estos (v2/legacy.ts) para que reportes y agregados sigan igual.
+   */
+  v2?: TransactionV2;
+}
+
+export interface TransactionV2 {
+  montoCentavos: number;
+  tipo: 'gasto' | 'ingreso' | 'transferencia';
+  origen: string | null;
+  destino: string | null;
+  cuentaFuente: 'terminacion' | 'alias' | 'modelo' | 'usuario';
 }
 
 export interface ParseResult {

@@ -22,6 +22,7 @@ import type {
   Profile,
   RecurringRecord,
   Transaction,
+  TransactionV2,
 } from './types';
 
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
@@ -443,6 +444,7 @@ interface TxnItem extends ParsedTransaction {
   rawMessage: string;
   createdAt: string;
   emoji?: string;
+  v2?: TransactionV2;
 }
 
 function toTransaction(item: Record<string, unknown>): Transaction {
@@ -459,8 +461,20 @@ function toTransaction(item: Record<string, unknown>): Transaction {
     rawMessage: it.rawMessage,
     createdAt: it.createdAt,
     ...(it.emoji ? { emoji: it.emoji } : {}),
+    ...(it.v2 ? { v2: it.v2 } : {}),
   };
 }
+
+/**
+ * En modo v2 solo cuentan los movimientos registrados con el modelo nuevo: los
+ * de v1 (datos de prueba) quedan fuera sin borrarlos. En v1 se ve todo.
+ */
+export function isVisibleInModel(txn: Transaction, model: 'v1' | 'v2'): boolean {
+  return model === 'v1' || txn.v2 !== undefined;
+}
+
+const visible = (txns: Transaction[]): Transaction[] =>
+  txns.filter((t) => isVisibleInModel(t, config.accountsModel));
 
 export async function putTransactions(txns: Transaction[]): Promise<void> {
   // Son pocas por mensaje (≤ ~5): puts secuenciales, sin batch.
@@ -490,10 +504,10 @@ async function queryByPrefix(skPrefix: string): Promise<Transaction[]> {
     items.push(...(res.Items ?? []).map(toTransaction));
     lastKey = res.LastEvaluatedKey;
   } while (lastKey);
-  return items;
+  return visible(items);
 }
 
-export const queryDay = (date: string): Promise<Transaction[]> => queryByPrefix(`TXN#${date}`);
+export const queryDay =(date: string): Promise<Transaction[]> => queryByPrefix(`TXN#${date}`);
 
 export const queryMonth = (yyyyMM: string): Promise<Transaction[]> => queryByPrefix(`TXN#${yyyyMM}`);
 
@@ -518,14 +532,16 @@ export async function queryRange(fromDate: string, toDate: string): Promise<Tran
     items.push(...(res.Items ?? []).map(toTransaction));
     lastKey = res.LastEvaluatedKey;
   } while (lastKey);
-  return items;
+  return visible(items);
 }
 
 export async function getTransaction(sk: string): Promise<Transaction | undefined> {
   const res = await doc.send(
     new GetCommand({ TableName: config.tableName, Key: { PK: pk(), SK: sk } }),
   );
-  return res.Item ? toTransaction(res.Item) : undefined;
+  if (!res.Item) return undefined;
+  const txn = toTransaction(res.Item);
+  return isVisibleInModel(txn, config.accountsModel) ? txn : undefined;
 }
 
 export async function findByShortId(date: string, shortId: number): Promise<Transaction | undefined> {
