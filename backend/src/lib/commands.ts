@@ -20,6 +20,7 @@ export type Command =
   | { kind: 'nombre'; name: string | null }
   | { kind: 'cuentas' }
   | { kind: 'tarjetas' }
+  | { kind: 'libre' }
   | { kind: 'ayuda' };
 
 export type MetasAction =
@@ -29,7 +30,7 @@ export type MetasAction =
   | { op: 'quitar'; category: string };
 
 const COMMAND_RE =
-  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|costo|borrar|nombre|cuentas|tarjetas|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
+  /^\/(hoy|semana|mes|reporte|nada|categorias|recurrentes|memoria|proyeccion|export|saldo|metas|costo|borrar|nombre|cuentas|tarjetas|libre|start|help|ayuda)(?:@\w+)?(?:\s+(.*))?$/is;
 
 /** Detecta comandos /hoy /semana /mes /reporte /borrar N (tolera @NombreDelBot). */
 export function matchCommand(text: string): Command | null {
@@ -94,6 +95,8 @@ export function matchCommand(text: string): Command | null {
       return { kind: 'cuentas' };
     case 'tarjetas':
       return { kind: 'tarjetas' };
+    case 'libre':
+      return { kind: 'libre' };
     default:
       // /start, /help, /ayuda
       return { kind: 'ayuda' };
@@ -157,6 +160,7 @@ export const HELP_TEXT = [
   '/export — el mes en curso como archivo CSV',
   '/borrar N — elimina el movimiento #N de hoy',
   '/nombre — cómo te llamo (cámbialo con: /nombre Luis)',
+  '/libre — cuánto te queda libre hasta tu próximo ingreso y después',
   '/tarjetas — corte, pago, pendiente e interés estimado de cada tarjeta',
   '/cuentas — tus bancos, cuentas y tarjetas del modelo nuevo (configúralas hablando conmigo)',
   '',

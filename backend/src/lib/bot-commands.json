@@ -14,6 +14,7 @@
   { "command": "export", "description": "Exportar el mes en curso como CSV" },
   { "command": "borrar", "description": "Eliminar el movimiento #N de hoy" },
   { "command": "nombre", "description": "Cómo te llamo (cámbialo con /nombre Luis)" },
+  { "command": "libre", "description": "Cuánto te queda libre hasta tu próximo ingreso" },
   { "command": "tarjetas", "description": "Corte, pago y pendiente de cada tarjeta" },
   { "command": "cuentas", "description": "Bancos, cuentas y tarjetas configurados" },
   { "command": "ayuda", "description": "Cómo usar el bot" }
