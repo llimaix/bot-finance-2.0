@@ -146,6 +146,8 @@ export async function listFacts(): Promise<Fact[]> {
       TableName: config.tableName,
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
       ExpressionAttributeValues: { ':pk': PK, ':prefix': 'FACT#' },
+      // Consistente: putFact cuenta justo después de escribir.
+      ConsistentRead: true,
     }),
   );
   return (res.Items ?? [])
@@ -154,13 +156,22 @@ export async function listFacts(): Promise<Fact[]> {
 }
 
 export async function putFact(fact: Fact): Promise<void> {
+  const limitError = () => new Error(`Límite de ${FACTS_LIMIT} hechos alcanzado; borra alguno con /memoria`);
   const existing = await listFacts();
-  if (existing.length >= FACTS_LIMIT) {
-    throw new Error(`Límite de ${FACTS_LIMIT} hechos alcanzado; borra alguno con /memoria`);
-  }
+  if (existing.length >= FACTS_LIMIT) throw limitError();
+
   await doc.send(
     new PutCommand({ TableName: config.tableName, Item: { PK, SK: `FACT#${fact.id}`, ...fact } }),
   );
+
+  // Otra escritura simultánea pudo pasar la misma comprobación: se vuelve a
+  // contar y, si se superó el límite, se deshace la propia. En el peor caso
+  // fallan las dos, nunca se queda por encima del límite.
+  const after = await listFacts();
+  if (after.length > FACTS_LIMIT) {
+    await deleteFact(fact.id);
+    throw limitError();
+  }
   logger.info('hecho aprendido', { id: fact.id, text: fact.text });
 }
 
@@ -182,21 +193,48 @@ export async function getConversation(): Promise<ConversationMessage[]> {
   return (res.Item?.messages as ConversationMessage[] | undefined) ?? [];
 }
 
-/** Agrega mensajes al historial, recortado a los últimos N (TTL 72h). */
+const CONVERSATION_MAX_ATTEMPTS = 3;
+
+/**
+ * Agrega mensajes al historial, recortado a los últimos N (TTL 72h).
+ *
+ * Concurrencia optimista: dos mensajes casi simultáneos corren en invocaciones
+ * distintas del processor; sin control, el segundo Put borraba el intercambio
+ * del primero. Se escribe solo si `version` no cambió desde la lectura; si
+ * cambió, se vuelve a leer y a intentar. (list_append no basta: hay que
+ * recortar a los últimos N y DynamoDB no puede añadir y recortar a la vez.)
+ */
 export async function appendConversation(newMessages: ConversationMessage[]): Promise<void> {
-  const current = await getConversation();
-  const messages = [...current, ...newMessages].slice(-CONVERSATION_LIMIT);
-  await doc.send(
-    new PutCommand({
-      TableName: config.tableName,
-      Item: {
-        PK,
-        SK: 'CONV#main',
-        messages,
-        ttl: Math.floor(Date.now() / 1000) + CONVERSATION_TTL_SECONDS,
-      },
-    }),
-  );
+  for (let attempt = 1; ; attempt++) {
+    const res = await doc.send(
+      new GetCommand({ TableName: config.tableName, Key: { PK, SK: 'CONV#main' }, ConsistentRead: true }),
+    );
+    const current = (res.Item?.messages as ConversationMessage[] | undefined) ?? [];
+    const version = (res.Item?.version as number | undefined) ?? 0;
+    const messages = [...current, ...newMessages].slice(-CONVERSATION_LIMIT);
+
+    try {
+      await doc.send(
+        new PutCommand({
+          TableName: config.tableName,
+          Item: {
+            PK,
+            SK: 'CONV#main',
+            messages,
+            version: version + 1,
+            ttl: Math.floor(Date.now() / 1000) + CONVERSATION_TTL_SECONDS,
+          },
+          // Sin versión: el item no existe o es anterior a este control.
+          ...(version === 0
+            ? { ConditionExpression: 'attribute_not_exists(PK) OR attribute_not_exists(version)' }
+            : { ConditionExpression: 'version = :v', ExpressionAttributeValues: { ':v': version } }),
+        }),
+      );
+      return;
+    } catch (err) {
+      if (!(err instanceof ConditionalCheckFailedException) || attempt >= CONVERSATION_MAX_ATTEMPTS) throw err;
+    }
+  }
 }
 
 // ── Cooldown de preguntas de recurrentes (item META#recask) ────────────────
