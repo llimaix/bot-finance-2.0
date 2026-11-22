@@ -2,7 +2,7 @@ import { ulid } from 'ulid';
 import { NO_WRITE_DISCLAIMER, needsDeterministicRegister, needsNoWriteDisclaimer, runAgent } from './ai/agent';
 import type { AgentDeps } from './ai/agent';
 import { answerQuestion, correctTransaction, materializeParsed, parseReceipt, parseTransactions } from './ai/parse';
-import type { ParseOutcome } from './ai/parse';
+import type { DatedTransaction, ParseOutcome } from './ai/parse';
 import { DEFAULT_ACCOUNTS, renderAffectedBalances, renderSaldos } from './accounts';
 import { renderMetas, suggestBudgets } from './budgets';
 import { resolveCategory } from './categories';
@@ -14,6 +14,7 @@ import { summarizeSearch } from './search';
 import { renderCosto, summarizeUsage } from './usage';
 import type { RecurringPayment } from './recurring';
 import { HELP_TEXT, matchCommand, matchCorrection, matchMethodAnswer } from './commands';
+import { config } from './config';
 import type { Command } from './commands';
 import { addDaysTo, daysAgoGT, daysElapsedInMonthGT, daysInMonth, monthLabelES, monthPrefixGT, todayGT } from './dates';
 import {
@@ -62,6 +63,8 @@ import { logger } from './logger';
 import { changeUserName, currentUserName } from './profile';
 import type { ConfigSnapshot } from './v2/config';
 import { applyUndo } from './v2/repo';
+import { planRegistroV2 } from './v2/registro';
+import type { PropuestaV2 } from './v2/registro';
 import { crearCuenta, editarCuenta, gestionarEntidad, loadSnapshot, renderConfig } from './v2/service';
 import type { ServiceResult } from './v2/service';
 import { buildReport } from './report';
@@ -341,7 +344,7 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     `Cuentas configuradas en el modelo nuevo: ${
       configV2.cuentas.length > 0
         ? configV2.cuentas
-            .map((c) => `${c.nombre} [${c.tipo}${c.terminaciones.length ? `, ••${c.terminaciones.join('/••')}` : ''}${c.activa ? '' : ', cerrada'}]`)
+            .map((c) => `${c.nombre} [id:${c.id}, ${c.tipo}${c.terminaciones.length ? `, ••${c.terminaciones.join('/••')}` : ''}${c.activa ? '' : ', cerrada'}]`)
             .join('; ')
         : 'ninguna todavía'
     }.`,
@@ -358,11 +361,23 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
   ].join('\n');
 
   const collectedWarnings: string[] = [];
+  const modelV2 = config.accountsModel === 'v2';
   const deps: AgentDeps = {
     today,
     contextInfo,
+    ...(modelV2 ? { cuentasV2Ids: configV2.cuentas.filter((c) => c.activa).map((c) => c.id) } : {}),
     register: async (input) => {
       const outcome = await materializeParsed(input);
+      if (modelV2) {
+        // origen/destino llegan intactos (materializeParsed conserva los campos
+        // extra); el CÓDIGO decide la cuenta y valida. Si algo no cuadra, no se
+        // guarda nada y el agente pregunta.
+        const plan = planRegistroV2(outcome.transactions as Array<DatedTransaction & PropuestaV2>, userText, configV2);
+        if (!plan.ok) {
+          return { txns: [], createdCategories: [], totalSpentToday: 0, advertencias: [], errores: plan.errores };
+        }
+        outcome.transactions = plan.txns;
+      }
       const txns = await persistOutcome(outcome, userText, today);
       // Los txns YA están escritos: un fallo de LECTURA aquí no debe hacer
       // rechazar (haría creer al agente que no guardó → la red re-registraría).
@@ -509,7 +524,10 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
   // registro y el agente NO ESCRIBIÓ NADA (ni corrigió/ajustó/marcó), lo
   // registramos con el parser forzado (100% confiable con M3). El control por
   // usedWriteTool evita doble-registrar cuando el agente corrigió/ajustó.
-  const needsSafetyNet = needsDeterministicRegister(result.usedWriteTool, userText);
+  // En modo v2 la red está apagada: el parser forzado no sabe de origen/destino
+  // y crearía movimientos que el modelo nuevo no ve. Si el agente afirmó un
+  // registro que no hizo, el aviso de "no se guardó" de abajo sigue saliendo.
+  const needsSafetyNet = !modelV2 && needsDeterministicRegister(result.usedWriteTool, userText);
   const safetyNetFits = fits(SAFETY_NET_MS);
   if (needsSafetyNet && !safetyNetFits) {
     // M5: sin tiempo para el parser forzado. El aviso de "no se guardó" de
@@ -726,10 +744,15 @@ async function persistOutcome(
     await putCategoryIfAbsent({ ...cat, source: 'auto', createdAt });
   }
 
-  // Si Allan NOMBRÓ la cuenta, el método no se negocia con el modelo: pasa por
-  // aquí todo lo que se registra (texto, voz, foto y agente), así que la regla
-  // no puede quedarse fuera de una ruta como pasó con los prompts.
-  const { txns: parsed, corrections } = enforceStatedMethod(outcome.transactions, rawMessage);
+  // Si el usuario NOMBRÓ la cuenta, el método no se negocia con el modelo: pasa
+  // por aquí todo lo que se registra (texto, voz, foto y agente), así que la
+  // regla no puede quedarse fuera de una ruta como pasó con los prompts.
+  // Modelo v2: el método se deriva de origen/destino (ya decididos por el
+  // resolvedor), así que la regla v1 no aplica.
+  const isV2 = outcome.transactions.some((t) => 'v2' in t);
+  const { txns: parsed, corrections } = isV2
+    ? { txns: outcome.transactions, corrections: [] as unknown[] }
+    : enforceStatedMethod(outcome.transactions, rawMessage);
   if (corrections.length > 0) {
     logger.info('método corregido por lo que dice el mensaje', { rawMessage, corrections });
   }
