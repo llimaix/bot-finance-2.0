@@ -128,3 +128,37 @@ export function renderMetas(progress: ReadonlyArray<BudgetProgress>, daysElapsed
   lines.push('', 'Ajusta: /metas comida 1500 · quita: /metas quitar comida · más: /metas sugerir');
   return lines.join('\n');
 }
+
+/** Umbrales de aviso al registrar: 80 % y 100 % del tope. */
+const CRUCES = [100, 80] as const;
+
+/**
+ * Avisos de meta al registrar (fase 6). Solo avisa cuando lo recién
+ * registrado CRUZA un umbral (antes por debajo, ahora en o por encima): así no
+ * se repite en cada gasto. `monthTxns` ya incluye los nuevos movimientos.
+ */
+export function budgetCrossings(
+  budgets: ReadonlyArray<BudgetRecord>,
+  monthTxns: ReadonlyArray<Transaction>,
+  newTxns: ReadonlyArray<Transaction>,
+  month: string,
+): string[] {
+  const avisos: string[] = [];
+  for (const b of budgets) {
+    if (b.monthlyLimit <= 0) continue;
+    const esGasto = (t: Transaction) => t.type === 'gasto' && t.category === b.category && t.date.startsWith(month);
+    const nuevo = newTxns.filter(esGasto).reduce((a, t) => a + t.amount, 0);
+    if (nuevo <= 0) continue;
+    const despues = monthTxns.filter(esGasto).reduce((a, t) => a + t.amount, 0);
+    const pctAntes = ((despues - nuevo) / b.monthlyLimit) * 100;
+    const pctDespues = (despues / b.monthlyLimit) * 100;
+    const cruce = CRUCES.find((u) => pctAntes < u && pctDespues >= u);
+    if (cruce === undefined) continue;
+    avisos.push(
+      cruce === 100
+        ? `🔴 Pasaste tu meta de ${b.category}: ${formatQ(round2(despues))} de ${formatQ(b.monthlyLimit)} (${Math.round(pctDespues)}%).`
+        : `🟡 Llevas el ${Math.round(pctDespues)}% de tu meta de ${b.category}: ${formatQ(round2(despues))} de ${formatQ(b.monthlyLimit)}.`,
+    );
+  }
+  return avisos;
+}
