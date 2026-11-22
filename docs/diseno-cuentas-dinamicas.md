@@ -2,11 +2,11 @@
 
 | Dato | Valor |
 |---|---|
-| Fecha | 2026-11-21 |
+| Fecha | 2026-11-21 (actualizado 2026-11-22: intereses de tarjeta, entidades bancarias con alias, terminación desde imágenes y nombre de usuario dinámico) |
 | Proyecto base | `bot-finance` (commit `b3d9e07`), solo como referencia; este diseño no modifica ese repositorio |
 | Documento relacionado | `analisis-bot-finance.md`, secciones 6 y 7 |
 | Supuestos | El bot es solo para Luis y parte de cero. Las cuentas de los ejemplos son ilustrativas; los datos reales solo cambian valores, no el modelo |
-| Estado | Decisiones de diseño tomadas (sección 11). Falta solo el inventario de cuentas e ingresos (sección 11.3) |
+| Estado | Decisiones de diseño tomadas (sección 11). Los datos del usuario se capturan en el alta guiada del bot, no en documentos (sección 11.3) |
 
 ---
 
@@ -70,9 +70,9 @@ interface Cuenta {
   id: string;                 // slug estable: 'bi-debito', 'bac-visa', 'bi-mastercard'
   nombre: string;             // 'Visa BAC'
   tipo: 'banco' | 'credito' | 'efectivo' | 'billetera';
-  banco: string | null;       // 'BI', 'BAC', 'Banrural'
+  entidadId: string | null;   // 'bi', 'bac', 'banrural' → BNK#<id> (sección 3.2); null en efectivo
   terminaciones: string[];    // ['1234', '9876'] (titular y adicional)
-  alias: string[];            // ['la bac', 'visa', 'la de crédito']
+  alias: string[];            // propios de la cuenta: ['la bac', 'visa', 'la de crédito']
   semillaCentavos: number;    // saldo al cierre de asOf; crédito = deuda en negativo
   asOf: string;
   estimada: boolean;
@@ -83,6 +83,10 @@ interface Cuenta {
     diaPago: number;          // si ≤ diaCorte, cae el mes siguiente
     ajustePago: 'siguiente_habil' | 'anterior_habil' | 'ninguno';
     diasAviso: number[];      // p. ej. [5, 2, 0] antes de la fecha de pago
+    interes?: {               // OPCIONAL al registrar la tarjeta (sección 5.4)
+      tasaBps: number;        // puntos básicos, entero: 3.5 % = 350 (sin punto flotante)
+      periodo: 'mensual' | 'anual';  // como la publica el banco
+    };
   };
 }
 ```
@@ -94,6 +98,24 @@ interface Cuenta {
 - Una cuenta de crédito nunca es `destino` de un `ingreso`; si ocurre, se avisa porque casi seguro es un error.
 - Cada terminación pertenece a una sola cuenta.
 - `montoCentavos` es un entero mayor que 0 (cierra también el hallazgo M3 del análisis).
+- Un alias normalizado (sección 3.2) pertenece a una sola entidad o a una sola cuenta, nunca a dos.
+- `interes.tasaBps`, si existe, es un entero mayor que 0; solo las cuentas `credito` pueden tenerlo.
+
+### 3.2 Entidades bancarias (`BNK#<id>`)
+
+Los alias del banco se registran una vez y valen para todas sus cuentas: "Banco Industrial", "BI" y "el Industrial" son la misma entidad, sea la cuenta de débito o la tarjeta.
+
+```ts
+interface EntidadBancaria {
+  id: string;                 // 'bi'
+  nombre: string;             // 'Banco Industrial'
+  alias: string[];            // ['bi', 'banco industrial', 'industrial']
+}
+```
+
+- **Normalización:** antes de comparar, el texto y los alias se pasan a minúsculas, sin tildes y con los espacios colapsados. "Banco Industrial", "banco industrial" y "BANCO INDUSTRIAL" coinciden.
+- **Alta:** al crear la primera cuenta de un banco, el bot propone la entidad y sus alias más comunes, y se confirman con botones. Después se pueden añadir alias en lenguaje natural ("a BI también le digo el Industrial").
+- **Relación con los alias de la cuenta:** los de la entidad identifican el banco; los de la cuenta, una cuenta concreta ("la visa", "la de crédito"). La sección 4 combina ambos.
 
 ---
 
@@ -101,12 +123,21 @@ interface Cuenta {
 
 Las fuentes se consultan en este orden de precedencia, y cada movimiento guarda cuál decidió (`cuentaFuente`):
 
-1. **Terminación.** Solo con contexto explícito: `termina(da)? en 1234`, `****1234`, `xxxx1234`, `final 1234`, o el campo `terminacion` que devuelva la visión del voucher. Nunca 4 dígitos sueltos: en "gasté 1234 en el súper" eso es un monto.
-2. **Alias o banco inequívoco.** Si "BAC" coincide con una sola cuenta, esa es. Si coincide con varias (BAC débito y BAC crédito), se filtra con "crédito"/"débito" en el texto; si sigue ambiguo, no se impone nada.
+1. **Terminación.** Solo con contexto explícito: `termina(da)? en 1234`, `****1234`, `xxxx1234`, `•••• 1234`, `final 1234`, o el campo `terminacion` que devuelva la visión. Nunca 4 dígitos sueltos: en "gasté 1234 en el súper" eso es un monto.
+2. **Alias.** Primero los de la cuenta ("la visa" → `bac-visa`). Si no hay, los de la entidad (sección 3.2): "Banco Industrial" o "BI" reducen las candidatas a las cuentas de esa entidad. Si queda una, esa es. Si quedan varias (BI débito y BI crédito), se filtra con "crédito"/"débito" en el texto; si sigue ambiguo, no se impone nada.
 3. **Propuesta del modelo.** El esquema zod del agente se arma dinámicamente con los IDs existentes (`z.enum([...idsActivos])`): el modelo no puede inventar una cuenta.
 4. **Preguntar** con botones inline de las cuentas posibles (sustituye al `method: 'na'` actual).
 
 Este mecanismo sustituye la lista `ACCOUNT_SIGNALS` de `guards.ts`, que tiene fijo "BI = débito".
+
+### 4.1 Terminación desde imágenes
+
+El usuario no tiene que decir con qué tarjeta pagó si la imagen lo muestra. Aplica a cualquier imagen: voucher, ticket, captura de la wallet del teléfono, de la app del banco o de una notificación de cobro.
+
+- **Esquema de visión:** el resultado incluye `terminacion: string | null`, con exactamente 4 dígitos. El prompt pide extraerla **solo** si aparece como número de tarjeta enmascarado (`•••• 1111`, `**** 1111`, `XXXX1111`, "terminada en 1111"), nunca de montos, fechas, teléfonos ni números de autorización.
+- **Resolución en código:** la terminación se busca en `terminaciones` de las cuentas activas. Si coincide con una, esa cuenta se impone con `cuentaFuente: 'terminacion'`, aunque el texto o el modelo digan otra cosa.
+- **Terminación desconocida:** el bot no adivina. Pregunta a qué cuenta pertenece, con botones, y al confirmar la **añade** a `terminaciones` de esa cuenta. La próxima imagen con esa tarjeta se resuelve sola.
+- **Privacidad:** solo se guardan los últimos 4 dígitos. Si la visión llegara a leer más dígitos, el código descarta todo salvo los 4 últimos y nunca los registra en logs.
 
 ---
 
@@ -139,6 +170,8 @@ interface CicloTarjeta {
 
 Guardarlo da historial para la gráfica de barras del dashboard y permite que el **estado de cuenta real** prevalezca sobre el cálculo ("mi estado BAC dice Q3,450.20").
 
+El item también admite `interesesCobrados?: number` (centavos), tomado del estado de cuenta cuando el banco cobra intereses (sección 5.4).
+
 ### 5.3 Avisos (en el guardián de las 08:30, sin schedules nuevos)
 
 | Momento | Mensaje |
@@ -148,6 +181,17 @@ Guardarlo da historial para la gráfica de barras del dashboard y permite que el
 | Según `diasAviso` antes del pago | "Faltan 2 días para pagar Q3,450.20 de Visa BAC (pendiente Q1,450.20)" |
 | Pago vencido con pendiente | "⚠️ Venció el pago de Visa BAC y faltan Q1,450.20" |
 | Uso mayor al 80 % del límite | "Visa BAC al 85 % de su límite" |
+| Antes del pago, si la tarjeta tiene tasa | "Si no pagas el total de Visa BAC, el interés estimado es ~Q120" (sección 5.4) |
+
+### 5.4 Intereses (opcional)
+
+La tasa es un dato **opcional** al registrar la tarjeta (`credito.interes`). Sin tasa, todo funciona igual que sin intereses.
+
+- **Para qué sirve:** mostrar el costo de no pagar el total. En `/tarjetas` y en los avisos de pago: "interés estimado si pagas solo el mínimo o una parte".
+- **Estimación:** pendiente después de la fecha de pago × tasa mensual. Si la tasa es anual, se divide entre 12. El cálculo es en centavos enteros, con la tasa en puntos básicos.
+- **Es una estimación y se muestra como tal ("~").** Cada banco calcula el interés a su manera (saldo promedio diario, fechas de cada compra), así que el bot no intenta replicarlo.
+- **El cargo real prevalece:** cuando el estado de cuenta trae intereses, se registran como un movimiento `gasto` con `origen = tarjeta` y categoría `intereses`, y se guardan en `interesesCobrados` del ciclo. Así entran en la deuda real y en los reportes.
+- **Sin cuotas:** los intereses de compras a cuotas siguen fuera del alcance (sección 11.2).
 
 ---
 
@@ -190,7 +234,20 @@ El crédito disponible **no** cuenta como libre: es deuda potencial, no dinero. 
 
 ## 8. CLAVES Y PATRONES DE ACCESO
 
-Todo vive bajo `PK = USER#<chatId>`. El bot es de un solo usuario, pero el valor sale de la configuración (`ALLOWED_CHAT_ID`) y no queda fijo en el código como hoy (`dynamo.ts:30`, `USER#allan`). Cuesta lo mismo y elimina un dato personal del código. Por la misma razón, el nombre del usuario en los prompts pasa a ser configurable.
+Todo vive bajo `PK = USER#<chatId>`. El bot es de un solo usuario, pero el valor sale de la configuración (`ALLOWED_CHAT_ID`) y no queda fijo en el código como hoy (`dynamo.ts:30`, `USER#allan`). Cuesta lo mismo y elimina un dato personal del código.
+
+**Perfil del usuario (`CFG#perfil`).** El nombre con el que el bot se dirige al usuario es un dato, no configuración de despliegue: se cambia **en caliente**, sin redesplegar.
+
+```ts
+interface Perfil {
+  nombre: string;             // 'Luis'
+  actualizadoEn: string;
+}
+```
+
+- Se pregunta en el alta guiada y se cambia con `/nombre Luis` o diciendo "llámame Luis" (herramienta `configurar_perfil`).
+- Los prompts y las descripciones de las herramientas se construyen en cada mensaje con el nombre del perfil. Hoy dicen "Allan" en 7 archivos de `src/`.
+- Sin perfil, el bot usa un trato neutro ("tú") hasta que se configure.
 
 | Patrón | Operación | ¿Necesita GSI? |
 |---|---|---|
@@ -199,6 +256,9 @@ Todo vive bajo `PK = USER#<chatId>`. El bot es de un solo usuario, pero el valor
 | Ciclo actual de una tarjeta | Query de rango de fechas `TXN#` + filtro por origen/destino | No |
 | Historial de cortes | Query `begins_with(SK, 'CYC#<cuenta>#')` | No |
 | Ingresos esperados | Query `begins_with(SK, 'INC#')` | No |
+| Entidades bancarias y sus alias | Query `begins_with(SK, 'BNK#')` | No |
+| Perfil del usuario | GetItem `CFG#perfil` | No |
+| Paso actual de un flujo guiado | GetItem `FLOW#<id>` (con TTL) | No |
 | Foto diaria para el dashboard | Query `begins_with(SK, 'SNAP#<yyyy-mm>')` | No |
 
 Un GSI por cuenta (`GSI1PK = ACC#<id>`, `GSI1SK = fecha`) solo haría falta si el volumen creciera mucho.
@@ -207,18 +267,39 @@ Un GSI por cuenta (`GSI1PK = ACC#<id>`, `GSI1SK = fecha`) solo haría falta si e
 
 ## 9. CAMBIOS EN EL BOT
 
+**Principio: el chat es la única vía de escritura; la Mini App solo lee.**
+
+- Todo dato (cuentas, entidades, alias, terminaciones, recurrentes, ingresos, perfil y movimientos) entra por el chat y pasa por las mismas funciones del backend, que validan las invariantes en código (sección 3.1).
+- La Mini App (análisis, sección 8) es un reporte visual de lo registrado: no expone endpoints de escritura. Una sesión robada o un error en el front no pueden modificar datos.
+- Los datos personales (bancos, terminaciones, límites, tasas, salario) viven solo en DynamoDB. Nunca en el repositorio, que es público.
+
+**Dos tipos de flujo de alta y edición, con la misma validación detrás:**
+
+| Flujo | Cómo funciona | Para qué |
+|---|---|---|
+| Guiado | Máquina de estados en código, con el paso actual en `FLOW#<id>` (TTL de 24 h). El bot pregunta paso a paso y ofrece botones; el LLM no decide el flujo, así que no se salta pasos ni inventa datos | Alta inicial y `/cuentas` → ➕ |
+| Libre | El agente interpreta el lenguaje natural ("agrega mi Visa BAC terminada en 1111, corta el 15") y llama a la herramienta correspondiente | Altas y cambios puntuales |
+
+- **Confirmación obligatoria:** toda alta o cambio de cuenta, entidad, recurrente, ingreso o perfil muestra una tarjeta de resumen con botones (✅ Guardar / ✏️ Corregir / ❌ Cancelar) y solo se guarda al confirmar. Los movimientos siguen registrándose al momento, con su botón 🗑️.
+- **Revisión cómoda en el chat:** `/cuentas` y `/tarjetas` listan todo con un botón ✏️ por cuenta, para no depender de la memoria del usuario.
+
+**Recurrentes declarados.** Hoy los recurrentes solo se aprenden del historial tras dos o tres meses (`REC#`, estado `candidato`). En la 2.0 también se declaran desde el primer día ("pago Netflix Q80 cada 10 con la BAC"): el item `REC#` añade `origen: 'aprendido' | 'declarado'`, la cuenta de cargo y el día. Los declarados entran directamente como `confirmado` y cuentan en "libre" y en la proyección.
+
 **Agente:**
 
 - `registrar_movimientos` pasa a usar `origen`/`destino` en lugar de `method`.
-- Herramientas nuevas: `crear_cuenta`, `editar_cuenta`, `consultar_tarjetas`, `registrar_estado_cuenta` (saldo al corte y pago mínimo) y `configurar_ingreso`.
+- Herramientas nuevas: `crear_cuenta` (con tasa de interés opcional), `editar_cuenta`, `gestionar_entidad` (alta de la entidad y sus alias), `consultar_tarjetas`, `registrar_estado_cuenta` (saldo al corte, pago mínimo e intereses cobrados), `configurar_ingreso`, `declarar_recurrente` y `configurar_perfil` (nombre del usuario). Las que escriben configuración no guardan directamente: devuelven la propuesta y el bot pide la confirmación con botones.
+
+**Visión:** el esquema de comprobantes añade `terminacion` (sección 4.1) y el prompt deja de suponer que la imagen es un voucher: también acepta capturas de la wallet, de la app del banco y de notificaciones.
 
 **Comandos:**
 
-- `/cuentas`: lista, alta y edición.
-- `/tarjetas`: deuda, corte, pago y uso del límite de cada tarjeta.
+- `/cuentas`: lista, alta y edición, incluidos alias y terminaciones.
+- `/tarjetas`: deuda, corte, pago, uso del límite y, si hay tasa, interés estimado de cada tarjeta.
 - `/libre`: las cifras de la sección 7.
+- `/nombre <nombre>`: cambia el nombre del perfil.
 
-**Alta guiada:** la primera vez, el bot pregunta qué cuentas y tarjetas existen, sus terminaciones, días de corte y pago, y el calendario de ingresos. Las altas y cambios de cuentas se confirman con botones.
+**Alta guiada:** la primera vez (sin `CFG#perfil`), el bot arranca el flujo guiado y pregunta, en este orden: el nombre con el que llamar al usuario; las entidades y sus alias; las cuentas y tarjetas de cada una, con sus terminaciones, días de corte y pago, límite y tasa de interés si se conoce; los ingresos esperados; y los recurrentes que ya se conozcan. Cada bloque se confirma con botones y se puede saltar para completarlo después. Este flujo sustituye al inventario en documentos: los datos nunca pasan por el repositorio.
 
 ---
 
@@ -242,6 +323,17 @@ Partiendo de cero no aplica. Si alguna vez hiciera falta:
 - Conciliación del ingreso en el límite de ±3 días y ±10 %.
 - Un `z.enum` dinámico rechaza una cuenta inexistente.
 - Centavos: 0,10 + 0,20 da exactamente 30 centavos.
+- Alias de entidad: "Banco Industrial", "BI" y "banco industrial" resuelven la misma entidad; con una sola cuenta de esa entidad se impone, con dos se filtra por "crédito"/"débito" o se pregunta.
+- Un mismo alias no puede quedar asignado a dos entidades o cuentas.
+- Captura de wallet con `•••• 1111` registrada en BI crédito: se impone esa cuenta sin texto adicional.
+- Imagen con una terminación desconocida: se pregunta la cuenta y, al confirmar, la terminación queda guardada.
+- Imagen con un número de autorización o un teléfono de 4 dígitos visibles: no se toma como terminación.
+- Interés: tasa mensual de 350 bps y pendiente de Q1,000.00 dan ~Q35.00; la misma tasa expresada como anual (4 200 bps) da el mismo resultado.
+- Tarjeta sin tasa: no se muestra ninguna estimación de interés.
+- Cambio de nombre con `/nombre` o "llámame Luis": el siguiente mensaje ya usa el nombre nuevo, sin redesplegar.
+- Alta de cuenta en lenguaje natural: no se guarda nada hasta pulsar ✅; con ❌ no queda rastro.
+- Flujo guiado interrumpido: al volver dentro de 24 h continúa en el mismo paso; después, el `FLOW#` expira y empieza de nuevo.
+- Recurrente declarado: cuenta en "libre" desde el primer mes, sin esperar al aprendizaje.
 
 ---
 
@@ -252,8 +344,14 @@ Partiendo de cero no aplica. Si alguna vez hiciera falta:
 | Decisión | Consecuencia en el modelo |
 |---|---|
 | **Sin saldo en dólares** | Una sola moneda (GTQ) por cuenta: cada tarjeta tiene un único saldo y un único límite. No hacen falta cuentas vinculadas ni saldos dobles |
-| **Sin compras a cuotas** | Cada compra entra completa en el ciclo donde ocurre. No se modelan planes de cuotas ni intereses |
-| **Solo para Luis** | Sin multiusuario. La autenticación del bot y del dashboard (Mini App) sigue siendo `ALLOWED_CHAT_ID`. La `PK` y el nombre del usuario salen de la configuración (sección 8) |
+| **Sin compras a cuotas** | Cada compra entra completa en el ciclo donde ocurre. No se modelan planes de cuotas |
+| **Solo para Luis** | Sin multiusuario. La autenticación del bot y del dashboard (Mini App) sigue siendo `ALLOWED_CHAT_ID`. La `PK` sale de la configuración (sección 8) |
+| **Intereses de tarjeta opcionales** (2026-11-22; sustituye "ni intereses") | Tasa opcional por tarjeta en puntos básicos, con su periodo. Se usa para estimar el costo de no pagar el total; el cargo real del estado de cuenta prevalece (sección 5.4) |
+| **Alias por entidad bancaria** (2026-11-22) | Nueva entidad `BNK#` con alias que valen para todas sus cuentas, además de los alias propios de cada cuenta (secciones 3.2 y 4) |
+| **Terminación desde cualquier imagen** (2026-11-22) | La visión extrae la terminación de vouchers y capturas de wallet, app o notificaciones; las desconocidas se aprenden tras confirmar (sección 4.1) |
+| **Nombre de usuario dinámico** (2026-11-22) | El nombre es un dato del perfil (`CFG#perfil`), editable sin redesplegar (sección 8) |
+| **Chat para escribir, Mini App para leer** (2026-11-22) | Toda alta y edición se hace por chat (flujo guiado o libre) con confirmación por botones; la Mini App es solo un reporte visual. Los datos personales no pasan por el repositorio (sección 9) |
+| **Recurrentes declarados** (2026-11-22) | Además de aprendidos, los recurrentes se pueden declarar desde el primer día (sección 9) |
 
 ### 11.2 Limitaciones conocidas (aceptadas)
 
@@ -261,15 +359,15 @@ Partiendo de cero no aplica. Si alguna vez hiciera falta:
    - **Mitigación:** al corte, `saldoEstadoCuenta` prevalece sobre el cálculo y la diferencia se muestra ("ajuste de Q3.40 por tipo de cambio"). Alternativa: corregir el movimiento cuando se vea el cargo real.
 2. **Compras a cuotas.** Si algún día se hace una, el bot la cargaría completa en ese corte y sobrestimaría el pago del ciclo. Si se vuelve habitual, habría que añadir el modelo de cuotas.
 
-### 11.3 Datos pendientes del usuario
+### 11.3 Datos del usuario
 
-Solo se necesitan los últimos 4 dígitos de cada tarjeta, nunca el número completo:
+No se recogen en documentos: el repositorio es público. Se capturan en el **alta guiada del bot** (sección 9) y viven solo en DynamoDB. El flujo pide:
 
-| Cuenta | Banco | Tipo (débito, crédito, efectivo, billetera) | Últimos 4 | Día de corte | Día de pago | Límite |
-|---|---|---|---|---|---|---|
-| | | | | | | |
-
-Salario: monto neto aproximado, días de pago y cuenta donde se deposita.
+- el nombre con el que el bot debe dirigirse al usuario;
+- por cada entidad: nombre y alias;
+- por cada cuenta o tarjeta: tipo, alias, últimos 4 dígitos (nunca el número completo) y, si es de crédito, día de corte, día de pago, límite y tasa de interés opcional;
+- ingresos esperados: monto neto aproximado, días y cuenta de depósito;
+- recurrentes conocidos: descripción, monto, día y cuenta de cargo.
 
 ---
 
@@ -279,6 +377,7 @@ El diagrama `diagramas/03-modelo-cuentas-propuesto.png` del análisis es anterio
 
 - usa `cuentaOrigen`/`cuentaDestino` en lugar de `origen`/`destino`;
 - `INGRESO_ESPERADO` tiene `frecuencia` en lugar de `dias[]`;
-- no incluye `alias`, `activa`, `cuentaFuente` ni `ajustePago`.
+- no incluye `alias`, `activa`, `cuentaFuente` ni `ajustePago`;
+- no incluye la entidad bancaria (`BNK#`), la tasa de interés, `interesesCobrados`, el perfil (`CFG#perfil`), los flujos guiados (`FLOW#`) ni el origen de los recurrentes, añadidos el 2026-11-22.
 
 La estructura (entidades y relaciones) es la misma. Si se actualiza el `.mmd`, hay que volver a renderizar el PNG.
