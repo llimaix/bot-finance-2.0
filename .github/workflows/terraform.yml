@@ -1,0 +1,23 @@
+name: terraform
+
+# Stub en la rama por defecto: solo habilita el botón "Run workflow".
+# El workflow real vive en chore/fork-original; al lanzarlo, elegir esa rama
+# en "Use workflow from". Desde main no hace nada.
+on:
+  workflow_dispatch:
+    inputs:
+      roots:
+        description: 'Roots separados por espacio (vacío = todos)'
+        required: false
+        default: ''
+
+permissions: {}
+
+jobs:
+  stub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: |
+          echo "::error::Stub de la rama por defecto. Lanza el workflow eligiendo la rama chore/fork-original en 'Use workflow from'."
+          exit 1
