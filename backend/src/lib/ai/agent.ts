@@ -84,6 +84,19 @@ export function needsNoWriteDisclaimer(usedWriteTool: boolean, replyText: string
   return !usedWriteTool && WRITE_CLAIM_RE.test(replyText);
 }
 
+/**
+ * Campos que `corregir_movimiento` puede cambiar. El monto debe ser positivo:
+ * el signo lo da `tipo`, y un -50 o un 0 del modelo invertiría o anularía los
+ * saldos (la otra ruta de corrección, parse.ts, ya exige > 0).
+ */
+export const correctionChangesSchema = z.object({
+  monto: z.number().positive().nullable(),
+  tipo: z.enum(TXN_TYPES).nullable(),
+  categoria: z.string().nullable(),
+  metodo: z.enum(METHODS).nullable(),
+  descripcion: z.string().nullable(),
+});
+
 export interface RegisteredBatch {
   txns: Transaction[];
   createdCategories: Array<{ name: string; emoji: string }>;
@@ -222,13 +235,7 @@ export async function runAgent(
         inputSchema: z.object({
           numero: z.number().int().positive(),
           fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
-          cambios: z.object({
-            monto: z.number().nullable(),
-            tipo: z.enum(TXN_TYPES).nullable(),
-            categoria: z.string().nullable(),
-            metodo: z.enum(METHODS).nullable(),
-            descripcion: z.string().nullable(),
-          }),
+          cambios: correctionChangesSchema,
         }),
         execute: async (input) => deps.correctMovement(input),
       }),

@@ -361,6 +361,11 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
       return { ok: true, aprendido: dato.trim() };
     },
     correctMovement: async ({ numero, fecha, cambios }) => {
+      // Defensa en profundidad: el esquema ya exige > 0, pero `??` dejaría
+      // pasar un 0 y un negativo invertiría los saldos.
+      if (cambios.monto !== null && (!Number.isFinite(cambios.monto) || cambios.monto <= 0)) {
+        return { ok: false, error: 'El monto corregido debe ser mayor que cero' };
+      }
       const date = fecha ?? today;
       const txn = await findByShortId(date, numero);
       if (!txn) return { ok: false, error: `No existe el movimiento #${numero} del ${date}` };
