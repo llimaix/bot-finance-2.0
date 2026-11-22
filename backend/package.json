@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "build": "node scripts/build.mjs",
     "set-webhook": "node scripts/set-webhook.mjs"
   },
   "dependencies": {
