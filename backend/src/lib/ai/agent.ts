@@ -73,6 +73,25 @@ export const WRITE_CLAIM_RE =
  * primer control, un "corrígelo a Q60" (corregir_movimiento) re-registraba un
  * gasto nuevo duplicado.
  */
+/** Forma mínima de un intento del agente que necesita `toolUsage`. */
+interface AttemptSteps {
+  steps?: ReadonlyArray<{ toolCalls?: ReadonlyArray<{ toolName: string }> }>;
+}
+
+/**
+ * Herramientas usadas en TODOS los intentos del turno (primer intento y
+ * reintento). Mirar solo el último perdía escrituras del primero: si este
+ * corregía un movimiento y el reintento no escribía, usedWriteTool quedaba en
+ * false y la red de seguridad registraba un duplicado.
+ */
+export function toolUsage(attempts: ReadonlyArray<AttemptSteps>): { usedAnyTool: boolean; usedWriteTool: boolean } {
+  const calls = attempts.flatMap((a) => (a.steps ?? []).flatMap((s) => s.toolCalls ?? []));
+  return {
+    usedAnyTool: calls.length > 0,
+    usedWriteTool: calls.some((tc) => WRITE_TOOLS.has(tc.toolName)),
+  };
+}
+
 export function needsDeterministicRegister(usedWriteTool: boolean, userText: string): boolean {
   return !usedWriteTool && REGISTER_INTENT_RE.test(userText);
 }
@@ -333,8 +352,8 @@ export async function runAgent(
   // llamado ninguna herramienta de escritura. Máximo UN reintento por turno
   // (presupuesto de tiempo del processor); si la afirmación falsa persiste,
   // el sistema estampa la verdad en el mensaje.
-  const wroteIn = (r: typeof result) =>
-    (r.steps ?? []).some((s) => (s.toolCalls ?? []).some((tc) => WRITE_TOOLS.has(tc.toolName)));
+  // Todos los intentos del turno: la detección de herramientas se acumula.
+  const attempts: Array<typeof result> = [result];
   const retryWith = async (nudge: string) => {
     result = await run(
       [...baseMessages, { role: 'assistant' as const, content: text }, { role: 'user' as const, content: nudge }],
@@ -344,17 +363,16 @@ export async function runAgent(
       steps: result.steps?.length,
       retry: true,
     });
+    attempts.push(result);
     text = stripThinking(result.text) || text;
   };
-
-  const anyTool = (r: typeof result) => (r.steps ?? []).some((s) => (s.toolCalls?.length ?? 0) > 0);
 
   // Promesa vacía ("espera un momento...") o loop terminado sin texto útil:
   // un reintento con empujón. (Las AFIRMACIONES falsas de registro las cubre
   // la red de seguridad DETERMINISTA en processing.ts, no un reintento a M3 —
   // reintentar producía disculpas confusas en consultas de lectura.)
   const emptyReply = stripThinking(result.text) === '' && registered.length === 0;
-  if ((!anyTool(result) && ANNOUNCE_RE.test(text)) || emptyReply) {
+  if ((!toolUsage([result]).usedAnyTool && ANNOUNCE_RE.test(text)) || emptyReply) {
     logger.warn('agente sin respuesta útil: reintento con empujón', { userText, reply: text, emptyReply });
     try {
       await retryWith(
@@ -377,5 +395,5 @@ export async function runAgent(
     registered: registered.length,
     reply: text,
   });
-  return { text, registered, usedAnyTool: anyTool(result), usedWriteTool: wroteIn(result) };
+  return { text, registered, ...toolUsage(attempts) };
 }
