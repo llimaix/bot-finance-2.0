@@ -220,6 +220,11 @@ Resources:
                   - secretsmanager:PutResourcePolicy
                   - secretsmanager:DeleteResourcePolicy
                 Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}/*'
+              - Sid: ReadTelegramSecretForWebhookRegistration
+                # Solo para el workflow manual telegram-webhook.yml (setWebhook).
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}/telegram-??????'
               - Sid: ApiGatewayV2
                 Effect: Allow
                 Action:
@@ -228,6 +233,8 @@ Resources:
                   - apigateway:PUT
                   - apigateway:PATCH
                   - apigateway:DELETE
+                  - apigateway:TagResource
+                  - apigateway:UntagResource
                 Resource:
                   - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis'
                   - !Sub 'arn:aws:apigateway:${AWS::Region}::/apis/*'
