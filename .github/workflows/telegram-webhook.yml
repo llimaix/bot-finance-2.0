@@ -1,0 +1,84 @@
+name: telegram-webhook
+
+# Registra el webhook y el menú de comandos en Telegram. Solo manual: hace falta
+# la primera vez y cuando cambien la URL de la API o el webhook_secret.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-webhook
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: bot-finance
+  TF_VERSION: 1.17.2
+  NODE_VERSION: '24'
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: telegram-webhook-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # URL desde el state de Terraform (solo lectura del output).
+      - id: url
+        working-directory: infra/live/api-gateway
+        run: |
+          set -euo pipefail
+          terraform init -lockfile=readonly >/dev/null
+          echo "url=$(terraform output -raw webhook_url)" >> "$GITHUB_OUTPUT"
+
+      # Lectura del secreto y registro en el MISMO paso: los valores solo viven
+      # en este proceso y se enmascaran antes de cualquier salida.
+      - name: Registrar webhook y comandos
+        working-directory: backend
+        env:
+          WEBHOOK_URL: ${{ steps.url.outputs.url }}
+        run: |
+          set -euo pipefail
+          json=$(aws secretsmanager get-secret-value \
+            --secret-id "$PROJECT_NAME/telegram" \
+            --query SecretString --output text)
+          TELEGRAM_BOT_TOKEN=$(jq -r '.bot_token // empty' <<<"$json")
+          TELEGRAM_WEBHOOK_SECRET=$(jq -r '.webhook_secret // empty' <<<"$json")
+          unset json
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_WEBHOOK_SECRET" ]; then
+            echo "::error::El secreto $PROJECT_NAME/telegram no tiene bot_token o webhook_secret"
+            exit 1
+          fi
+          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+          echo "::add-mask::$TELEGRAM_WEBHOOK_SECRET"
+          export TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
+
+          node scripts/set-webhook.mjs
+
+          # Comprobación: qué tiene registrado Telegram ahora mismo.
+          curl -fsS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo" \
+            | jq '{url: .result.url, pendientes: .result.pending_update_count, ultimo_error: .result.last_error_message}'
