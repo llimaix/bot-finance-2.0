@@ -114,7 +114,7 @@ interface EntidadBancaria {
 ```
 
 - **Normalización:** antes de comparar, el texto y los alias se pasan a minúsculas, sin tildes y con los espacios colapsados. "Banco Industrial", "banco industrial" y "BANCO INDUSTRIAL" coinciden.
-- **Alta:** al crear la primera cuenta de un banco, el bot propone la entidad y sus alias más comunes, y se confirman con botones. Después se pueden añadir alias en lenguaje natural ("a BI también le digo el Industrial").
+- **Alta:** al crear la primera cuenta de un banco, el agente crea la entidad con sus alias más comunes y muestra el resumen con ↩️ Deshacer. Después se pueden añadir alias en lenguaje natural ("a BI también le digo el Industrial").
 - **Relación con los alias de la cuenta:** los de la entidad identifican el banco; los de la cuenta, una cuenta concreta ("la visa", "la de crédito"). La sección 4 combina ambos.
 
 ---
@@ -258,7 +258,6 @@ interface Perfil {
 | Ingresos esperados | Query `begins_with(SK, 'INC#')` | No |
 | Entidades bancarias y sus alias | Query `begins_with(SK, 'BNK#')` | No |
 | Perfil del usuario | GetItem `CFG#perfil` | No |
-| Paso actual de un flujo guiado | GetItem `FLOW#<id>` (con TTL) | No |
 | Foto diaria para el dashboard | Query `begins_with(SK, 'SNAP#<yyyy-mm>')` | No |
 
 Un GSI por cuenta (`GSI1PK = ACC#<id>`, `GSI1SK = fecha`) solo haría falta si el volumen creciera mucho.
@@ -273,22 +272,24 @@ Un GSI por cuenta (`GSI1PK = ACC#<id>`, `GSI1SK = fecha`) solo haría falta si e
 - La Mini App (análisis, sección 8) es un reporte visual de lo registrado: no expone endpoints de escritura. Una sesión robada o un error en el front no pueden modificar datos.
 - Los datos personales (bancos, terminaciones, límites, tasas, salario) viven solo en DynamoDB. Nunca en el repositorio, que es público.
 
-**Dos tipos de flujo de alta y edición, con la misma validación detrás:**
+**La configuración la hace el agente, sin tarjetas de confirmación** (decisión del 2026-11-22). El agente interpreta la instrucción ("agrega mi Visa BAC terminada en 1111, corta el 15", "llámame Luis") y llama a la herramienta, que valida en código y guarda. El seguro no es pedir permiso antes, sino mostrar exactamente qué se guardó después:
 
-| Flujo | Cómo funciona | Para qué |
-|---|---|---|
-| Guiado | Máquina de estados en código, con el paso actual en `FLOW#<id>` (TTL de 24 h). El bot pregunta paso a paso y ofrece botones; el LLM no decide el flujo, así que no se salta pasos ni inventa datos | Alta inicial y `/cuentas` → ➕ |
-| Libre | El agente interpreta el lenguaje natural ("agrega mi Visa BAC terminada en 1111, corta el 15") y llama a la herramienta correspondiente | Altas y cambios puntuales |
+| Dato | Cómo se aplica |
+|---|---|
+| Nombre, alias, metas | Directo: el agente guarda y lo dice en su respuesta. Se corrige con otro mensaje |
+| Cuentas, tarjetas, terminaciones, ingresos y recurrentes | Directo con **resumen y deshacer**: el bot añade un resumen generado por **código** con lo que quedó guardado ("Visa BAC · ••1111 · corte 15 · pago 5 · límite Q10,000") y un solo botón **↩️ Deshacer**. Si está bien, no hay que hacer nada |
+| Movimientos | Igual que hoy: se registran al momento, con su botón 🗑️ |
 
-- **Confirmación obligatoria:** toda alta o cambio de cuenta, entidad, recurrente, ingreso o perfil muestra una tarjeta de resumen con botones (✅ Guardar / ✏️ Corregir / ❌ Cancelar) y solo se guarda al confirmar. Los movimientos siguen registrándose al momento, con su botón 🗑️.
-- **Revisión cómoda en el chat:** `/cuentas` y `/tarjetas` listan todo con un botón ✏️ por cuenta, para no depender de la memoria del usuario.
+- **Por qué el resumen lo genera el código:** si el modelo malinterpreta (por ejemplo, asigna una terminación a la cuenta equivocada), el error se ve en ese mismo mensaje, no semanas después en los saldos. El resumen describe lo guardado en DynamoDB, no lo que el modelo cree haber hecho.
+- **↩️ Deshacer** restaura el estado anterior del item (alta → se borra; cambio → vuelve el valor previo). Caduca a las 24 h y solo deshace esa operación.
+- **Revisión cómoda en el chat:** `/cuentas` y `/tarjetas` listan todo lo configurado, para no depender de la memoria del usuario.
 
 **Recurrentes declarados.** Hoy los recurrentes solo se aprenden del historial tras dos o tres meses (`REC#`, estado `candidato`). En la 2.0 también se declaran desde el primer día ("pago Netflix Q80 cada 10 con la BAC"): el item `REC#` añade `origen: 'aprendido' | 'declarado'`, la cuenta de cargo y el día. Los declarados entran directamente como `confirmado` y cuentan en "libre" y en la proyección.
 
 **Agente:**
 
 - `registrar_movimientos` pasa a usar `origen`/`destino` en lugar de `method`.
-- Herramientas nuevas: `crear_cuenta` (con tasa de interés opcional), `editar_cuenta`, `gestionar_entidad` (alta de la entidad y sus alias), `consultar_tarjetas`, `registrar_estado_cuenta` (saldo al corte, pago mínimo e intereses cobrados), `configurar_ingreso`, `declarar_recurrente` y `configurar_perfil` (nombre del usuario). Las que escriben configuración no guardan directamente: devuelven la propuesta y el bot pide la confirmación con botones.
+- Herramientas nuevas: `crear_cuenta` (con tasa de interés opcional), `editar_cuenta`, `gestionar_entidad` (alta de la entidad y sus alias), `consultar_tarjetas`, `registrar_estado_cuenta` (saldo al corte, pago mínimo e intereses cobrados), `configurar_ingreso`, `declarar_recurrente` y `configurar_perfil` (nombre del usuario). Guardan directamente; las de cuentas, tarjetas, terminaciones, ingresos y recurrentes devuelven además el resumen y el identificador para ↩️ Deshacer.
 
 **Visión:** el esquema de comprobantes añade `terminacion` (sección 4.1) y el prompt deja de suponer que la imagen es un voucher: también acepta capturas de la wallet, de la app del banco y de notificaciones.
 
@@ -299,7 +300,7 @@ Un GSI por cuenta (`GSI1PK = ACC#<id>`, `GSI1SK = fecha`) solo haría falta si e
 - `/libre`: las cifras de la sección 7.
 - `/nombre <nombre>`: cambia el nombre del perfil.
 
-**Alta guiada:** la primera vez (sin `CFG#perfil`), el bot arranca el flujo guiado y pregunta, en este orden: el nombre con el que llamar al usuario; las entidades y sus alias; las cuentas y tarjetas de cada una, con sus terminaciones, días de corte y pago, límite y tasa de interés si se conoce; los ingresos esperados; y los recurrentes que ya se conozcan. Cada bloque se confirma con botones y se puede saltar para completarlo después. Este flujo sustituye al inventario en documentos: los datos nunca pasan por el repositorio.
+**Alta conversacional:** la conduce el agente, sin máquina de estados. Si no hay perfil o no hay cuentas configuradas, el contexto del agente lo indica y el agente pregunta de forma natural: el nombre con el que llamar al usuario; las entidades y sus alias; las cuentas y tarjetas, con sus terminaciones, días de corte y pago, límite y tasa de interés si se conoce; los ingresos esperados; y los recurrentes que ya se conozcan. El usuario puede darlo todo en un mensaje o por partes, y dejar cosas para después. Cada alta muestra su resumen con ↩️ Deshacer. Los datos nunca pasan por el repositorio.
 
 ---
 
@@ -331,8 +332,8 @@ Partiendo de cero no aplica. Si alguna vez hiciera falta:
 - Interés: tasa mensual de 350 bps y pendiente de Q1,000.00 dan ~Q35.00; la misma tasa expresada como anual (4 200 bps) da el mismo resultado.
 - Tarjeta sin tasa: no se muestra ninguna estimación de interés.
 - Cambio de nombre con `/nombre` o "llámame Luis": el siguiente mensaje ya usa el nombre nuevo, sin redesplegar.
-- Alta de cuenta en lenguaje natural: no se guarda nada hasta pulsar ✅; con ❌ no queda rastro.
-- Flujo guiado interrumpido: al volver dentro de 24 h continúa en el mismo paso; después, el `FLOW#` expira y empieza de nuevo.
+- Alta de cuenta en lenguaje natural: se guarda al momento y el resumen muestra exactamente lo guardado; ↩️ Deshacer la elimina.
+- ↩️ Deshacer de un cambio restaura el valor anterior; pasadas 24 h ya no hace nada.
 - Recurrente declarado: cuenta en "libre" desde el primer mes, sin esperar al aprendizaje.
 
 ---
@@ -350,7 +351,7 @@ Partiendo de cero no aplica. Si alguna vez hiciera falta:
 | **Alias por entidad bancaria** (2026-11-22) | Nueva entidad `BNK#` con alias que valen para todas sus cuentas, además de los alias propios de cada cuenta (secciones 3.2 y 4) |
 | **Terminación desde cualquier imagen** (2026-11-22) | La visión extrae la terminación de vouchers y capturas de wallet, app o notificaciones; las desconocidas se aprenden tras confirmar (sección 4.1) |
 | **Nombre de usuario dinámico** (2026-11-22) | El nombre es un dato del perfil (`CFG#perfil`), editable sin redesplegar (sección 8) |
-| **Chat para escribir, Mini App para leer** (2026-11-22) | Toda alta y edición se hace por chat (flujo guiado o libre) con confirmación por botones; la Mini App es solo un reporte visual. Los datos personales no pasan por el repositorio (sección 9) |
+| **Chat para escribir, Mini App para leer** (2026-11-22) | Toda alta y edición la hace el agente por chat, sin tarjetas de confirmación; en cuentas y tarjetas, resumen con ↩️ Deshacer; la Mini App es solo un reporte visual. Los datos personales no pasan por el repositorio (sección 9) |
 | **Recurrentes declarados** (2026-11-22) | Además de aprendidos, los recurrentes se pueden declarar desde el primer día (sección 9) |
 
 ### 11.2 Limitaciones conocidas (aceptadas)
@@ -378,6 +379,6 @@ El diagrama `diagramas/03-modelo-cuentas-propuesto.png` del análisis es anterio
 - usa `cuentaOrigen`/`cuentaDestino` en lugar de `origen`/`destino`;
 - `INGRESO_ESPERADO` tiene `frecuencia` en lugar de `dias[]`;
 - no incluye `alias`, `activa`, `cuentaFuente` ni `ajustePago`;
-- no incluye la entidad bancaria (`BNK#`), la tasa de interés, `interesesCobrados`, el perfil (`CFG#perfil`), los flujos guiados (`FLOW#`) ni el origen de los recurrentes, añadidos el 2026-11-22.
+- no incluye la entidad bancaria (`BNK#`), la tasa de interés, `interesesCobrados`, el perfil (`CFG#perfil`) ni el origen de los recurrentes, añadidos el 2026-11-22.
 
 La estructura (entidades y relaciones) es la misma. Si se actualiza el `.mmd`, hay que volver a renderizar el PNG.

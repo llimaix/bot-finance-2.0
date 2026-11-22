@@ -38,7 +38,7 @@
 | 2026-11-22 | **Alias por entidad bancaria** ("Banco Industrial" = "BI"), además de los alias por cuenta (diseño, 3.2) |
 | 2026-11-22 | **Terminación desde cualquier imagen** (voucher, wallet, app, notificación), con aprendizaje de terminaciones nuevas (diseño, 4.1) |
 | 2026-11-22 | **Nombre de usuario dinámico** en el perfil (`CFG#perfil`), editable sin redesplegar (diseño, 8) |
-| 2026-11-22 | **Chat para escribir, Mini App para leer**: toda alta y edición por chat (flujo guiado o libre, con confirmación por botones); la Mini App es solo un reporte visual sin endpoints de escritura (diseño, 9) |
+| 2026-11-22 | **Chat para escribir, Mini App para leer**: toda alta y edición por chat (lo hace el agente, sin tarjetas de confirmación; en cuentas y tarjetas, resumen con ↩️ Deshacer); la Mini App es solo un reporte visual sin endpoints de escritura (diseño, 9) |
 | 2026-11-22 | **Recurrentes declarados** desde el primer día, además de los aprendidos (diseño, 9) |
 | 2026-11-22 | **Datos personales fuera del repositorio** (es público): el inventario de cuentas se captura en el alta guiada del bot |
 
@@ -81,7 +81,7 @@ Resueltos en el fork (`chore/fork-original`). Si la 2.0 parte de esa rama, los h
 
 ### 4.3 Funcionalidad nueva (en orden de dependencia)
 
-1. **Perfil y alta guiada por chat**: nombre dinámico, `PK` desde configuración, motor de flujos guiados (`FLOW#`) con confirmación por botones (diseño, secciones 8 y 9). Es la base para capturar todo lo demás.
+1. **Perfil**: nombre dinámico y `PK` desde configuración (diseño, sección 8). ✅ Hecho en `v1.2.0`.
 2. **Cuentas dinámicas** con partida doble y centavos, y **entidades bancarias con alias** (diseño, secciones 2–3.2).
 3. **Reconocimiento de la cuenta** por terminación, en texto y en **cualquier imagen** (voucher, wallet, app, notificación), y por alias de cuenta o de entidad; las terminaciones desconocidas se aprenden (diseño, secciones 4 y 4.1).
 4. **Ciclos de tarjeta** con avisos de corte y pago en el guardián, e **intereses opcionales** con estimación y cargo real del estado de cuenta (diseño, sección 5).
