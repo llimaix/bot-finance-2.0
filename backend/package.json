@@ -2,7 +2,7 @@
   "name": "finanzas-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Bot de Telegram para control de finanzas personales (GTQ) — serverless en AWS CDK",
+  "description": "Bot de Telegram para control de finanzas personales (GTQ) — serverless en AWS",
   "type": "module",
   "packageManager": "pnpm@11.1.1",
   "engines": {
@@ -12,9 +12,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "cdk": "cdk",
-    "synth": "cdk synth",
-    "deploy": "cdk deploy FinanzasStack --require-approval never",
     "set-webhook": "node scripts/set-webhook.mjs"
   },
   "dependencies": {
