@@ -97,9 +97,9 @@ Detalle y evidencia de cada hallazgo en `docs/analisis-bot-finance.md`, sección
 
 ## 6. LECCIONES DEL ENTORNO (para no repetir errores)
 
-- **Commits:** Git firma con SSH (`commit.gpgsign=true`, llave en `~/.ssh`); el sandbox no da acceso, así que Claude deja el staging y el mensaje y **Luis ejecuta el commit**. No usar `--no-gpg-sign`.
+- **Commits:** Git firma con SSH (`commit.gpgsign=true`, llave en `~/.ssh`); el sandbox no da acceso, así que se deja el staging y el mensaje y **Luis ejecuta el commit**. No usar `--no-gpg-sign`.
 - **`.env*`:** ni lectura ni `stat` desde el sandbox; `git add -A` falla si hay un `.env*` sin seguimiento (usar pathspec de exclusión, p. ej. `':!*.example'`). Los comandos que nombran `.env` pueden ser rechazados por la regla de permisos.
 - **npm:** el sandbox no deja escribir en `~/.npm/_cacache`; usar `--cache` en un directorio temporal. El mensaje de npm sobre "archivos de root" es engañoso: no hace falta `sudo chown`.
 - **Red:** el sandbox sale por un proxy (`HTTPS_PROXY`). `curl` y npm lo usan; el descargador de Puppeteer no.
 - **Mermaid:** no hay renderizador instalado. Chrome headless no arranca dentro del sandbox (puerto Mach denegado); el render lo ejecuta Luis en su terminal. El `chrome-headless-shell` de Chrome for Testing viene con firma ad-hoc, sin notarizar. Tras usarlo, borrar la instalación temporal.
-- **Escritura:** este repo debe estar añadido a la sesión (abrir Claude Code aquí o `/add-dir`).
+- **Escritura:** este repo debe estar añadido a la sesión de trabajo.
