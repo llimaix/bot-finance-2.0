@@ -63,6 +63,7 @@ import { logger } from './logger';
 import { changeUserName, currentUserName } from './profile';
 import type { ConfigSnapshot } from './v2/config';
 import { applyUndo } from './v2/repo';
+import { loadBalancesV2, renderAffectedV2, renderSaldosV2 } from './v2/saldos';
 import { planRegistroV2 } from './v2/registro';
 import type { PropuestaV2 } from './v2/registro';
 import { crearCuenta, editarCuenta, gestionarEntidad, loadSnapshot, renderConfig } from './v2/service';
@@ -846,6 +847,7 @@ const loadBalances = loadBalancesReadonly;
  *  movimientos ya están guardados y la confirmación debe llegar igual). */
 async function affectedBalanceLines(txns: ReadonlyArray<Transaction>, today: string): Promise<string[]> {
   try {
+    if (config.accountsModel === 'v2') return renderAffectedV2(txns, (await loadBalancesV2(today)).saldos);
     return renderAffectedBalances(txns, await loadBalances(today));
   } catch (err) {
     logger.error('saldos tras registrar fallaron', { error: String(err) });
@@ -1114,6 +1116,16 @@ async function handleCommand(chatId: number, today: string, command: Command): P
     }
 
     case 'saldo': {
+      // Modelo v2: saldos por partida doble; los ajustes se piden en lenguaje
+      // natural (editar_cuenta) porque las cuentas ya no son las 5 fijas.
+      if (config.accountsModel === 'v2') {
+        if (command.set || command.invalidArgs) {
+          await sendMessage(chatId, 'Para ajustar un saldo dímelo en lenguaje natural, por ejemplo: "mi efectivo es Q350" o "debo Q1,500 en la Visa".');
+          return;
+        }
+        await sendMessage(chatId, renderSaldosV2((await loadBalancesV2(today)).saldos));
+        return;
+      }
       if (command.invalidArgs) {
         await sendMessage(
           chatId,

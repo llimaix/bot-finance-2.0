@@ -1,6 +1,7 @@
 import { DEFAULT_ACCOUNTS, computeBalances } from './accounts';
 import type { AccountBalance } from './accounts';
 import { computeAggregates } from './aggregates';
+import { config } from './config';
 import { budgetProgress } from './budgets';
 import type { BudgetProgress } from './budgets';
 import { daysAgoGT, daysElapsedInMonthGT, monthPrefixGT, nextPaydayAfter, paydaysOfMonth } from './dates';
@@ -11,6 +12,7 @@ import type { Projection } from './projection';
 import { applySalaryCalendar, detectRecurring, recurringForAdvisor } from './recurring';
 import type { AdvisorRecurring } from './recurring';
 import type { Account, Transaction } from './types';
+import { loadBalancesV2, toLegacyBalances } from './v2/saldos';
 
 /**
  * Ensamble de datos para asesorar (webhook) y vigilar (guardián). Solo LECTURAS:
@@ -18,6 +20,9 @@ import type { Account, Transaction } from './types';
  */
 
 export async function loadBalancesReadonly(today: string): Promise<AccountBalance[]> {
+  // Modelo v2: saldos por partida doble de las cuentas configuradas, en la
+  // forma v1 para que contexto del agente, guardián y proyección no cambien.
+  if (config.accountsModel === 'v2') return toLegacyBalances((await loadBalancesV2(today)).saldos);
   const stored = await listAccounts();
   const accounts: Account[] =
     stored.length > 0
