@@ -8,6 +8,7 @@ import { logger } from '../lib/logger';
 import { loadProfile } from '../lib/profile';
 import { loadSecrets } from '../lib/secrets';
 import { sendMessage } from '../lib/telegram';
+import { alertasTarjetas, loadCiclos } from '../lib/v2/tarjetas';
 import type { ScheduleEvent } from '../lib/types';
 
 const PRIMARY_MESSAGE =
@@ -25,6 +26,8 @@ export const handler = async (event: ScheduleEvent): Promise<void> => {
     // Vigilancia diaria con reglas deterministas: solo habla si hay hallazgos.
     const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
     const findings = guardianFindings(data);
+    // Modelo v2: avisos de corte, pago, vencimiento y uso del límite por tarjeta.
+    if (config.accountsModel === 'v2') findings.push(...alertasTarjetas((await loadCiclos(today)).tarjetas, today));
     if (findings.length === 0) {
       logger.info('guardián sin hallazgos', { date: today });
       return;
