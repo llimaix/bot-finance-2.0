@@ -19,7 +19,7 @@ Pasar de un bot pensado para las cuentas y el calendario de Allan a uno que se a
 
 1. **El chat es la única vía de escritura; la Mini App solo lee** (sección 9).
 2. **Datos personales fuera del repositorio**, que es público. Cuentas, terminaciones, límites, tasas, salario y nombre viven solo en DynamoDB.
-3. **El código valida; el modelo propone.** Las invariantes (sección 3.1) se comprueban en código. El LLM nunca guarda configuración sin una confirmación por botones.
+3. **El código valida; el modelo propone.** Las invariantes (sección 3.1) se comprueban en código. El agente guarda directamente; en cuentas, tarjetas y terminaciones el código muestra un resumen de lo guardado con ↩️ Deshacer.
 4. **Montos en centavos enteros**; tasas en puntos básicos enteros.
 5. **Cada PR deja el bot funcionando.** Un merge a `main` despliega automáticamente, así que ningún PR puede dejar el bot a medias.
 6. **Cada cambio con sus tests**, empezando por los casos mínimos de la sección 10.2.
@@ -46,7 +46,7 @@ Pasar de un bot pensado para las cuentas y el calendario de Allan a uno que se a
 | Fase | Versión | Alcance | Depende de | Tamaño |
 |---|---|---|---|---|
 | 0 | `v1.1.0` | Base de trabajo y deudas menores | — | S |
-| 1 | `v1.2.0` | Perfil del usuario y motor de flujos guiados | 0 | M |
+| 1 | `v1.2.0` | Perfil del usuario y partición por chat | 0 | S |
 | 2 | — | Cuentas dinámicas y entidades bancarias (con el interruptor en `v1`) | 1 | L |
 | 3 | — | Reconocimiento de la cuenta: terminación (texto e imágenes) y alias | 2 | M |
 | 4 | **`v2.0.0`** | Ciclos de tarjeta e intereses; se activa el modelo `v2` | 3 | L |
@@ -74,18 +74,18 @@ Tamaño: S, unos pocos PR pequeños; M, varios PR o uno mediano; L, varios PR co
 
 **Criterios de aceptación:** el CI corre en cada PR y el merge despliega; el menú de Telegram muestra los 15 comandos; dos mensajes simultáneos no pierden historial.
 
-### Fase 1: perfil y flujos guiados (`v1.2.0`)
+### Fase 1: perfil y partición por chat (`v1.2.0`) ✅
 
-**Objetivo:** que el bot llame al usuario por su nombre y tenga el motor de flujos guiados que usarán las fases siguientes. No cambia el modelo de cuentas.
+**Objetivo:** que el bot llame al usuario por su nombre y que los datos dejen de estar atados a `USER#allan`. No cambia el modelo de cuentas.
+
+**Cambio de enfoque (2026-11-22):** se descartó el motor de flujos guiados con botones de confirmación. La configuración la hace el agente directamente; en cuentas, tarjetas y terminaciones, el código muestra un resumen de lo guardado con ↩️ Deshacer (diseño, sección 9).
 
 | PR | Cambio |
 |---|---|
 | `feat/` | Perfil `CFG#perfil`: `/nombre`, herramienta `configurar_perfil` y prompts construidos en cada mensaje. Sin perfil, trato neutro (sección 8) |
 | `feat/` | `PK` desde `ALLOWED_CHAT_ID` en lugar de `USER#allan`; los datos de prueba se reinician (sección 7 de este plan) |
-| `feat/` | Motor de flujos guiados: estado en `FLOW#<id>` con TTL de 24 h, pasos con botones y tarjeta de confirmación ✅ / ✏️ / ❌ (sección 9) |
-| `feat/` | Primer flujo: alta del perfil, que sirve de prueba del motor |
 
-**Criterios de aceptación:** "llámame Luis" cambia el nombre en el siguiente mensaje sin redesplegar; un flujo interrumpido continúa en el mismo paso dentro de 24 h; ningún texto del bot dice "Allan".
+**Criterios de aceptación:** "llámame Luis" cambia el nombre en el siguiente mensaje sin redesplegar; ningún texto del bot dice "Allan".
 
 ### Fase 2: cuentas dinámicas y entidades (modelo `v2` en paralelo)
 
@@ -96,7 +96,7 @@ Tamaño: S, unos pocos PR pequeños; M, varios PR o uno mediano; L, varios PR co
 | `feat/` | Tipos, esquemas e invariantes de `Cuenta`, `EntidadBancaria` y `Movimiento` con `origen`/`destino` en centavos (secciones 2, 3 y 3.1) |
 | `feat/` | Repositorio DynamoDB de `ACC#` y `BNK#`, y cálculo de saldo por partida doble |
 | `feat/` | Herramientas `crear_cuenta`, `editar_cuenta` y `gestionar_entidad`, que proponen y piden confirmación |
-| `feat/` | Flujo guiado de alta de entidades, cuentas y tarjetas (con tasa de interés opcional), y comando `/cuentas` con edición por botones |
+| `feat/` | Alta conversacional por el agente de entidades, cuentas y tarjetas (con tasa de interés opcional), resumen con ↩️ Deshacer y comando `/cuentas` |
 
 **Criterios de aceptación:** casos de la sección 10.2 sobre partida doble, pago de tarjeta, alias únicos y centavos.
 
