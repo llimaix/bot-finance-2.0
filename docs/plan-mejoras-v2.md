@@ -66,7 +66,7 @@ Tamaño: S, unos pocos PR pequeños; M, varios PR o uno mediano; L, varios PR co
 
 | PR | Cambio |
 |---|---|
-| `chore/` | Ruleset de `main` y borrado de la rama `chore/fork-original` (la conserva el tag `v1.0.0`) |
+| `chore/` | Ruleset de `main` (PR obligatorio, CI en verde, solo *squash*, sin force push ni borrado) y borrado de las ramas `chore/fork-original` (la conserva el tag `v1.0.0`) y `chore/integrar-fork` |
 | `docs/` | README nuevo: estructura, bootstrap, pipelines, secretos y cómo re-armar el bot tras el kill switch |
 | `fix/` | Menú de comandos sincronizado: `set-webhook.mjs` usa `BOT_COMMANDS`, así que aparecen `/metas` y `/costo` |
 | `fix/` | Escrituras que pueden pisarse: `appendConversation` con `list_append` y `putFact` con condición (análisis, tabla de hallazgos bajos) |
@@ -81,7 +81,7 @@ Tamaño: S, unos pocos PR pequeños; M, varios PR o uno mediano; L, varios PR co
 | PR | Cambio |
 |---|---|
 | `feat/` | Perfil `CFG#perfil`: `/nombre`, herramienta `configurar_perfil` y prompts construidos en cada mensaje. Sin perfil, trato neutro (sección 8) |
-| `feat/` | `PK` desde `ALLOWED_CHAT_ID` en lugar de `USER#allan`, con la migración de los datos actuales (sección 7 de este plan) |
+| `feat/` | `PK` desde `ALLOWED_CHAT_ID` en lugar de `USER#allan`; los datos de prueba se reinician (sección 7 de este plan) |
 | `feat/` | Motor de flujos guiados: estado en `FLOW#<id>` con TTL de 24 h, pasos con botones y tarjeta de confirmación ✅ / ✏️ / ❌ (sección 9) |
 | `feat/` | Primer flujo: alta del perfil, que sirve de prueba del motor |
 
@@ -123,7 +123,7 @@ Tamaño: S, unos pocos PR pequeños; M, varios PR o uno mediano; L, varios PR co
 | `feat/` | Avisos de corte, pago, vencimiento, uso del límite e interés estimado en el guardián (secciones 5.3 y 5.4) |
 | `feat/` | `registrar_estado_cuenta` con saldo al corte, pago mínimo e intereses cobrados; `/tarjetas` |
 | `feat/` | Comandos y reportes existentes (`/saldo`, `/hoy`, `/mes`, `/reporte`, `/export`) leyendo el modelo nuevo |
-| `feat/` | **Activación:** `ACCOUNTS_MODEL = v2`, alta guiada completa y retirada del código del modelo `v1` |
+| `feat/` | **Activación:** `ACCOUNTS_MODEL = v2`, reinicio de los datos de prueba, alta guiada completa y retirada del código del modelo `v1` |
 
 **Criterios de aceptación:** casos de la sección 10.2 sobre cortes (31 en febrero, `diaPago` menor que `diaCorte`), pago parcial e intereses; todos los comandos funcionan con el modelo nuevo.
 
@@ -165,14 +165,16 @@ Tamaño: S, unos pocos PR pequeños; M, varios PR o uno mediano; L, varios PR co
 
 ---
 
-## 7. DECISIONES PENDIENTES
+## 7. DECISIONES
 
-| Decisión | Opciones | Recomendación |
-|---|---|---|
-| Datos registrados durante `v1` | (a) Reiniciar la tabla al activar `v2`; (b) migrar con un script verificado (sección 10.1) | (a) si solo son pruebas; (b) si ya se usa con datos reales |
-| Cambio de `PK` en la fase 1 | Migrar los items de `USER#allan` a `USER#<chatId>` o reiniciar | Según la decisión anterior |
-| Eval golden en el CI | Mantenerlo no bloqueante o volverlo bloqueante | Bloqueante cuando sea estable con MiniMax-M3 (hallazgo M7) |
-| Plan de Terraform en los PR | Hoy solo en el merge; verlo en el PR requiere un rol OIDC de solo lectura | Valorarlo cuando haya PR de infraestructura frecuentes |
+| Decisión | Resolución (2026-11-22) |
+|---|---|
+| Datos registrados durante `v1` | **Se reinician.** Hoy solo hay datos de prueba: no hace falta el script de migración de la sección 10.1 del diseño |
+| Cambio de `PK` en la fase 1 | **Se reinicia**, igual que el punto anterior: los items de `USER#allan` se borran y se empieza en `USER#<chatId>` |
+| Eval golden del agente (`backend/scripts/eval-agent.ts`) | **No por ahora.** Hoy no corre en ningún pipeline. Sus 16 casos son de las cuentas de Allan y caducan con el modelo `v2`. En la fase 3 se escriben casos nuevos y se ejecutan con un workflow manual; volverlo bloqueante se valora después |
+| Plan de Terraform en los PR | **No.** El plan y el apply se quedan en el merge a `main`, con aprobación; el CI de los PR valida sin credenciales |
+
+Mientras la fase 1 no esté desplegada, el bot sigue en `v1` y lo que se registre se considera de prueba.
 
 ---
 
