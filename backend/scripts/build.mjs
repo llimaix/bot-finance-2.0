@@ -16,6 +16,7 @@ const FUNCTIONS = {
   processor: 'src/handlers/processor.ts',
   reminder: 'src/handlers/reminder.ts',
   'monthly-report': 'src/handlers/monthly-report.ts',
+  miniapp: 'src/handlers/miniapp.ts',
 };
 
 rmSync('dist', { recursive: true, force: true });

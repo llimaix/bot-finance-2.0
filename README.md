@@ -46,19 +46,20 @@ AWS Budgets     ──▶ $10/mes del gasto con tag Project ──▶ kill switc
 
 ```
 backend/                 Código de las Lambdas (Node.js 24, TypeScript, pnpm, Vitest)
-  src/handlers/          webhook, processor, reminder, monthly-report
+  src/handlers/          webhook, processor, reminder, monthly-report, miniapp (API del dashboard)
   src/lib/               lógica del bot: agente, parseo, DynamoDB, Telegram, secretos, logger
   test/                  tests de la lógica pura
   scripts/               build.mjs (esbuild + metafile), set-webhook.mjs, eval-agent.ts
+frontend/                Dashboard de solo lectura (Telegram Mini App): React + Vite, gráficas SVG propias
 infra/                   Terraform
   modules/               submódulos reutilizables (lambda-function, http-api, lambda-schedules, ...)
   live/<root>/           un root por componente, cada uno con su state
 bootstrap/cloudformation Plantilla única: bucket del state, rol OIDC y permissions boundary
 docs/                    análisis, diseño 2.0, plan de mejoras y estado
-.github/workflows/       ci, terraform, lambdas, telegram-webhook
+.github/workflows/       ci, terraform, lambdas, miniapp, telegram-webhook
 ```
 
-Roots de Terraform, en orden de aplicación: `dynamodb`, `secrets`, `lambda-app-processor`, `lambda-app-webhook`, `lambda-app-reminder`, `lambda-app-monthly-report`, `api-gateway`, `scheduler`, `observability`, `budget`.
+Roots de Terraform, en orden de aplicación: `dynamodb`, `secrets`, `lambda-app-processor`, `lambda-app-webhook`, `lambda-app-reminder`, `lambda-app-monthly-report`, `lambda-app-miniapp`, `api-gateway`, `miniapp-web`, `scheduler`, `observability`, `budget`.
 
 ---
 
@@ -75,6 +76,13 @@ Roots de Terraform, en orden de aplicación: `dynamodb`, `secrets`, `lambda-app-
 | Enseñarle algo | "mi salario cae el 15 y el 29" (se ve en `/memoria`) |
 
 **Comandos:** `/hoy`, `/semana`, `/mes`, `/reporte`, `/nada`, `/categorias`, `/saldo`, `/proyeccion`, `/metas`, `/costo`, `/recurrentes`, `/memoria`, `/export`, `/borrar`, `/nombre`, `/cuentas`, `/tarjetas`, `/libre`, `/ayuda`.
+
+**Dashboard (Mini App):** el botón *Dashboard* del chat abre `https://financebot.isdomana.com` dentro de Telegram. Es de solo lectura (el chat sigue siendo el único canal de escritura): libre hasta el próximo ingreso, evolución diaria, gasto por día y por categoría, tarjetas, metas, cuentas y últimos movimientos.
+
+- El bucket S3 es privado y solo lo lee la distribución de CloudFront (OAC).
+- La API (`/api/dashboard`) es una Lambda Function URL con `AWS_IAM`: solo CloudFront, firmando con OAC, puede invocarla.
+- Cada petición lleva el `initData` de Telegram en `X-Telegram-Init-Data`; la Lambda valida su firma HMAC con el token del bot, su antigüedad y que el usuario sea el permitido. Fuera de Telegram no muestra datos.
+- En local, `pnpm dev` en `frontend/` muestra datos ficticios (no entran en el build de producción).
 
 Detalle completo y diferencias con el original: `docs/funcionalidad-fork.md`.
 
@@ -144,10 +152,11 @@ Terraform crea los secretos **vacíos**. Los valores se cargan a mano en *Secret
 
 | Workflow | Cuándo | Qué hace |
 |---|---|---|
-| `ci` | PR hacia `main` | Sin credenciales de AWS: typecheck, tests y build del backend; `fmt`, `validate` y `tflint` de Terraform |
+| `ci` | PR hacia `main` | Sin credenciales de AWS: typecheck, tests y build del backend y del frontend; `fmt`, `validate` y `tflint` de Terraform |
 | `terraform` | Push a `main` con cambios en `infra/`, o manual | Detecta los roots afectados (también por cambios en sus módulos), planea en orden y, si hay cambios, pide aprobación en el environment `terraform-apply` y aplica los planes aprobados |
 | `lambdas` | Push a `main` con cambios en `backend/`, o manual | Typecheck, tests y build; cruza los cambios con el metafile de esbuild y despliega solo las funciones afectadas (matriz, una por job) |
-| `telegram-webhook` | Manual | Registra el webhook y el menú de comandos en Telegram |
+| `miniapp` | Push a `main` con cambios en `frontend/`, o manual | Typecheck y build del frontend; sube a S3 (assets con caché de un año, `index.html` sin caché) e invalida `index.html` en CloudFront |
+| `telegram-webhook` | Manual | Registra el webhook, el menú de comandos y el botón *Dashboard* de la Mini App |
 
 Las acciones de terceros están fijadas por SHA. Los planes de Terraform se guardan como artefacto 1 día.
 

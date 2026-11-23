@@ -7,6 +7,7 @@ locals {
     processor      = "${var.project_name}-processor"
     reminder       = "${var.project_name}-reminder"
     monthly-report = "${var.project_name}-monthly-report"
+    miniapp        = "${var.project_name}-miniapp"
   }
 }
 
