@@ -30,7 +30,7 @@ env:
   TF_ROOTS_ORDER: >-
     dynamodb secrets
     lambda-app-processor lambda-app-webhook lambda-app-reminder lambda-app-monthly-report
-    api-gateway scheduler observability budget
+    lambda-app-miniapp api-gateway miniapp-web scheduler observability budget
 
 jobs:
   detect:

@@ -7,6 +7,8 @@ Parameters:
   ProjectName:
     Type: String
     Default: bot-finance
+    AllowedValues: [bot-finance]
+    Description: Prefijo de los recursos; fijo porque bucket, rol y boundary tienen nombre fijo
   Environment:
     Type: String
     Default: prod
@@ -27,15 +29,38 @@ Parameters:
   DeployBranch:
     Type: String
     Default: main
+  SiteDomain:
+    Type: String
+    Default: financebot.isdomana.com
+    AllowedPattern: '^[a-z0-9.-]+[a-z0-9]$'
+    Description: Dominio de la Mini App (CloudFront + ACM), en minúsculas y sin punto final
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Hosted zone pública de Route 53 que contiene SiteDomain (sin el prefijo /hostedzone/)
+  ManageStateResources:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      false solo para recrear la pila cuando el bucket del state y el boundary ya
+      existen (sobreviven al borrado); después se importan con un change set
+      IMPORT y este valor vuelve a true.
+
+Conditions:
+  ManageState: !Equals [!Ref ManageStateResources, 'true']
 
 Resources:
   # ── State de Terraform ────────────────────────────────────────────────
+  # Nombres FIJOS en bucket, boundary y rol: el resto de la plantilla los
+  # referencia por ARN para no depender de ManageStateResources (el bucket y el
+  # boundary sobreviven al borrado de la pila y se re-importan).
   TfStateBucket:
     Type: AWS::S3::Bucket
+    Condition: ManageState
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Sub '${ProjectName}-tfstate'
+      BucketName: bot-finance-tfstate
       VersioningConfiguration:
         Status: Enabled
       BucketEncryption:
@@ -68,7 +93,7 @@ Resources:
   TfStateBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref TfStateBucket
+      Bucket: bot-finance-tfstate
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -77,8 +102,8 @@ Resources:
             Principal: '*'
             Action: 's3:*'
             Resource:
-              - !GetAtt TfStateBucket.Arn
-              - !Sub '${TfStateBucket.Arn}/*'
+              - 'arn:aws:s3:::bot-finance-tfstate'
+              - 'arn:aws:s3:::bot-finance-tfstate/*'
             Condition:
               Bool:
                 'aws:SecureTransport': 'false'
@@ -86,8 +111,11 @@ Resources:
   # ── Techo de permisos para todo rol que cree Terraform ─────────────────
   WorkloadBoundary:
     Type: AWS::IAM::ManagedPolicy
+    Condition: ManageState
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
     Properties:
-      ManagedPolicyName: !Sub 'boundary-${ProjectName}'
+      ManagedPolicyName: boundary-bot-finance
       Description: Techo de permisos de los roles creados por Terraform para bot-finance
       PolicyDocument:
         Version: '2012-10-17'
@@ -144,8 +172,10 @@ Resources:
   # ── Rol que asume GitHub Actions ───────────────────────────────────────
   GitHubActionsRole:
     Type: AWS::IAM::Role
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
     Properties:
-      RoleName: !Sub 'github-actions-${ProjectName}'
+      RoleName: github-actions-bot-finance
       Description: !Sub 'Rol OIDC de GitHub Actions para ${GitHubOwner}/${GitHubRepo} (rama ${DeployBranch})'
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
@@ -171,13 +201,13 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: s3:ListBucket
-                Resource: !GetAtt TfStateBucket.Arn
+                Resource: 'arn:aws:s3:::bot-finance-tfstate'
               - Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
-                Resource: !Sub '${TfStateBucket.Arn}/*'
+                Resource: 'arn:aws:s3:::bot-finance-tfstate/*'
         - PolicyName: workload-resources
           PolicyDocument:
             Version: '2012-10-17'
@@ -289,7 +319,7 @@ Resources:
                 Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*'
                 Condition:
                   ArnEquals:
-                    'iam:PermissionsBoundary': !Ref WorkloadBoundary
+                    'iam:PermissionsBoundary': !Sub 'arn:aws:iam::${AWS::AccountId}:policy/boundary-bot-finance'
               - Sid: ManageOwnRoles
                 Effect: Allow
                 Action:
@@ -334,9 +364,115 @@ Resources:
                 Action: iam:DeleteRolePermissionsBoundary
                 Resource: '*'
 
+  # ── Permisos de la Mini App (S3, CloudFront, ACM y Route 53) ─────────────
+  # Managed policy (no inline): las inline del rol tienen un límite conjunto
+  # de 10 240 caracteres.
+  MiniAppDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${ProjectName}-github-miniapp'
+      Description: S3, CloudFront, ACM y Route 53 de la Mini App para el rol de GitHub Actions
+      Roles:
+        - !Ref GitHubActionsRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SiteBucket
+            Effect: Allow
+            Action: s3:*
+            Resource:
+              - !Sub 'arn:aws:s3:::${ProjectName}-miniapp-*'
+              - !Sub 'arn:aws:s3:::${ProjectName}-miniapp-*/*'
+          - Sid: CloudFront
+            # CloudFront no permite acotar la creación por nombre: las
+            # distribuciones, OAC y políticas se crean sobre '*'.
+            Effect: Allow
+            Action:
+              - cloudfront:CreateDistribution
+              - cloudfront:CreateDistributionWithTags
+              - cloudfront:GetDistribution
+              - cloudfront:GetDistributionConfig
+              - cloudfront:UpdateDistribution
+              - cloudfront:DeleteDistribution
+              - cloudfront:TagResource
+              - cloudfront:UntagResource
+              - cloudfront:ListTagsForResource
+              - cloudfront:CreateInvalidation
+              - cloudfront:GetInvalidation
+              - cloudfront:CreateOriginAccessControl
+              - cloudfront:GetOriginAccessControl
+              - cloudfront:GetOriginAccessControlConfig
+              - cloudfront:UpdateOriginAccessControl
+              - cloudfront:DeleteOriginAccessControl
+              - cloudfront:ListOriginAccessControls
+              - cloudfront:CreateResponseHeadersPolicy
+              - cloudfront:GetResponseHeadersPolicy
+              - cloudfront:GetResponseHeadersPolicyConfig
+              - cloudfront:UpdateResponseHeadersPolicy
+              - cloudfront:DeleteResponseHeadersPolicy
+              - cloudfront:ListResponseHeadersPolicies
+              - cloudfront:GetCachePolicy
+              - cloudfront:ListCachePolicies
+              - cloudfront:GetOriginRequestPolicy
+              - cloudfront:ListOriginRequestPolicies
+            Resource: '*'
+          - Sid: AcmRequestTagged
+            Effect: Allow
+            Action:
+              - acm:RequestCertificate
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'aws:RequestTag/Project': !Ref ProjectName
+          - Sid: AcmRead
+            Effect: Allow
+            Action:
+              - acm:DescribeCertificate
+              - acm:ListTagsForCertificate
+            Resource: !Sub 'arn:aws:acm:us-east-1:${AWS::AccountId}:certificate/*'
+          - Sid: AcmManageOwn
+            Effect: Allow
+            Action:
+              - acm:AddTagsToCertificate
+              - acm:RemoveTagsFromCertificate
+              - acm:DeleteCertificate
+            Resource: !Sub 'arn:aws:acm:us-east-1:${AWS::AccountId}:certificate/*'
+            Condition:
+              StringEquals:
+                'aws:ResourceTag/Project': !Ref ProjectName
+          - Sid: Route53Read
+            Effect: Allow
+            Action:
+              - route53:ListHostedZones
+              - route53:ListHostedZonesByName
+              - route53:GetChange
+            Resource: '*'
+          - Sid: Route53Zone
+            Effect: Allow
+            Action:
+              - route53:GetHostedZone
+              - route53:ListResourceRecordSets
+              - route53:ListTagsForResource
+            Resource: !Sub 'arn:aws:route53:::hostedzone/${HostedZoneId}'
+          - Sid: Route53OnlySiteRecords
+            # Solo el alias del sitio y la validación DNS de ACM.
+            Effect: Allow
+            Action: route53:ChangeResourceRecordSets
+            Resource: !Sub 'arn:aws:route53:::hostedzone/${HostedZoneId}'
+            Condition:
+              'ForAllValues:StringLike':
+                'route53:ChangeResourceRecordSetsNormalizedRecordNames':
+                  - !Ref SiteDomain
+                  - !Sub '_*.${SiteDomain}'
+          # Ni el propio pipeline puede invocar la API saltándose CloudFront.
+          - Sid: DenyDirectMiniAppApi
+            Effect: Deny
+            Action: lambda:InvokeFunctionUrl
+            Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectName}-miniapp'
+
 Outputs:
   TfStateBucketName:
-    Value: !Ref TfStateBucket
+    Value: bot-finance-tfstate
     Export:
       Name: !Sub '${ProjectName}-tfstate-bucket'
   GitHubActionsRoleArn:
@@ -344,4 +480,7 @@ Outputs:
     Value: !GetAtt GitHubActionsRole.Arn
   WorkloadBoundaryArn:
     Description: Boundary obligatorio para los roles que cree Terraform
-    Value: !Ref WorkloadBoundary
+    Value: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/boundary-bot-finance'
+  MiniAppDeployPolicyArn:
+    Description: Permisos de la Mini App adjuntos al rol de GitHub Actions
+    Value: !Ref MiniAppDeployPolicy

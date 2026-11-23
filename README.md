@@ -93,6 +93,21 @@ Requisito: el proveedor OIDC de GitHub (`token.actions.githubusercontent.com`) d
 
 Crea el bucket del state (`bot-finance-tfstate`), el rol `github-actions-bot-finance`, que solo puede asumir la rama `main` de este repo, y el boundary `boundary-bot-finance`, obligatorio en todos los roles que crea Terraform.
 
+El parámetro `HostedZoneId` es el ID de la hosted zone pública que contiene el dominio de la Mini App (sin `/hostedzone/`). La pila también crea la managed policy `bot-finance-github-miniapp` (S3, CloudFront, ACM y Route 53 de la Mini App).
+
+El bucket tiene `Retain`, y el rol y el boundary `RetainExceptOnCreate`: borrar la pila no los elimina (el boundary, además, no se puede borrar mientras lo usen los roles de las Lambdas). Para recrear la pila cuando el bucket y el boundary ya existen:
+
+1. Crear la pila con `ManageStateResources=false`: crea el rol y las políticas, sin el bucket ni el boundary.
+2. Importarlos con un change set `IMPORT` y `ManageStateResources=true` (una importación no puede crear recursos, solo adoptar):
+
+```
+aws cloudformation create-change-set --stack-name bot-finance-bootstrap --change-set-name adoptar \
+  --change-set-type IMPORT --capabilities CAPABILITY_NAMED_IAM \
+  --template-body file://bootstrap/cloudformation/template.yml \
+  --parameters ParameterKey=HostedZoneId,UsePreviousValue=true ParameterKey=ManageStateResources,ParameterValue=true \
+  --resources-to-import '[{"ResourceType":"AWS::S3::Bucket","LogicalResourceId":"TfStateBucket","ResourceIdentifier":{"BucketName":"bot-finance-tfstate"}},{"ResourceType":"AWS::IAM::ManagedPolicy","LogicalResourceId":"WorkloadBoundary","ResourceIdentifier":{"PolicyArn":"arn:aws:iam::<cuenta>:policy/boundary-bot-finance"}}]'
+```
+
 ### 2. GitHub
 
 | Dónde | Qué |
