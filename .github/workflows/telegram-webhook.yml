@@ -1,6 +1,6 @@
 name: telegram-webhook
 
-# Registra el webhook y el menú de comandos en Telegram. Solo manual: hace falta
+# Registra el webhook, el menú de comandos y el botón del dashboard (Mini App) en Telegram. Solo manual: hace falta
 # la primera vez y cuando cambien la URL de la API o el webhook_secret.
 on:
   workflow_dispatch:
@@ -55,12 +55,20 @@ jobs:
           terraform init -lockfile=readonly >/dev/null
           echo "url=$(terraform output -raw webhook_url)" >> "$GITHUB_OUTPUT"
 
+      - id: miniapp
+        working-directory: infra/live/miniapp-web
+        run: |
+          set -euo pipefail
+          terraform init -lockfile=readonly >/dev/null
+          echo "url=$(terraform output -raw url)" >> "$GITHUB_OUTPUT"
+
       # Lectura del secreto y registro en el MISMO paso: los valores solo viven
       # en este proceso y se enmascaran antes de cualquier salida.
       - name: Registrar webhook y comandos
         working-directory: backend
         env:
           WEBHOOK_URL: ${{ steps.url.outputs.url }}
+          MINIAPP_URL: ${{ steps.miniapp.outputs.url }}
         run: |
           set -euo pipefail
           json=$(aws secretsmanager get-secret-value \
@@ -78,6 +86,12 @@ jobs:
           export TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET
 
           node scripts/set-webhook.mjs
+
+          # Botón de menú del chat que abre el dashboard (Mini App).
+          jq -n --arg url "$MINIAPP_URL" '{menu_button: {type: "web_app", text: "Dashboard", web_app: {url: $url}}}' \
+            | curl -fsS -X POST -H 'content-type: application/json' --data @- \
+                "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setChatMenuButton" \
+            | jq '{menu_button: .ok}'
 
           # Comprobación: qué tiene registrado Telegram ahora mismo.
           curl -fsS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo" \

@@ -5,4 +5,4 @@ repository   = "llimaix/bot-finance-2.0"
 
 domain_name      = "financebot.isdomana.com"
 hosted_zone_name = "isdomana.com"
-enable_api       = false
+enable_api       = true

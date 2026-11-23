@@ -3,7 +3,7 @@
 data "aws_caller_identity" "current" {}
 
 data "aws_lambda_function" "guarded" {
-  for_each      = toset(["webhook", "processor", "reminder", "monthly-report"])
+  for_each      = toset(["webhook", "processor", "reminder", "monthly-report", "miniapp"])
   function_name = "${var.project_name}-${each.key}"
 }
 

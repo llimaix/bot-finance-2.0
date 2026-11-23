@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       functions:
-        description: 'Funciones separadas por espacio: webhook processor reminder monthly-report (vacío = todas)'
+        description: 'Funciones separadas por espacio: webhook processor reminder monthly-report miniapp (vacío = todas)'
         required: false
         default: ''
 
@@ -24,7 +24,7 @@ env:
   AWS_REGION: us-east-1
   PROJECT_NAME: bot-finance
   NODE_VERSION: '24'
-  FUNCTIONS: webhook processor reminder monthly-report
+  FUNCTIONS: webhook processor reminder monthly-report miniapp
 
 jobs:
   build:
