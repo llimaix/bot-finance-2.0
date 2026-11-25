@@ -3,7 +3,7 @@ import { totales } from '../src/lib/v2/balance';
 import { planCrearCuenta, planEditarCuenta, resumenCuenta } from '../src/lib/v2/config';
 import type { ConfigSnapshot, CrearCuentaInput, EditarCuentaInput } from '../src/lib/v2/config';
 import { calcularLibre, renderLibre } from '../src/lib/v2/libre';
-import { esDeuda, esLiquida, validateConfig, validateMovimiento } from '../src/lib/v2/model';
+import { aliasConNumero, esDeuda, esLiquida, validateConfig, validateMovimiento } from '../src/lib/v2/model';
 import type { Cuenta, Movimiento } from '../src/lib/v2/model';
 import { resolverCuenta } from '../src/lib/v2/resolver';
 import type { SaldoV2 } from '../src/lib/v2/saldos';
@@ -240,5 +240,49 @@ describe('convertir una cuenta de banco en préstamo', () => {
   it('cuota en una cuenta que sigue siendo banco se rechaza', () => {
     const r = planEditarCuenta(editar({ cuenta: 'banco-a', nuevoTipo: null, cuotaMensual: 100 }), SNAP, TODAY);
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('alias con números de cuenta', () => {
+  const base = (over: Partial<EditarCuentaInput>): EditarCuentaInput => ({
+    cuenta: 'prestamo-x',
+    nuevoNombre: null,
+    agregarAlias: [],
+    quitarAlias: [],
+    agregarTerminaciones: [],
+    quitarTerminaciones: [],
+    saldoActual: null,
+    activa: null,
+    nuevoTipo: null,
+    diaCorte: null,
+    diaPago: null,
+    limite: null,
+    tasaInteres: null,
+    periodoTasa: null,
+    cuotaMensual: null,
+    plazoCuotas: null,
+    vence: null,
+    ...over,
+  });
+
+  it('detecta 6+ dígitos aunque vengan con espacios o guiones', () => {
+    expect(aliasConNumero('123456')).toBe(true);
+    expect(aliasConNumero('1234 5678')).toBe(true);
+    expect(aliasConNumero('12-34-56')).toBe(true);
+    expect(aliasConNumero('Préstamo Premium 3')).toBe(false);
+    expect(aliasConNumero('cuenta 2026')).toBe(false);
+  });
+
+  it('no deja agregarlo al editar ni al crear', () => {
+    expect(planEditarCuenta(base({ agregarAlias: ['999988887777'] }), SNAP, TODAY).ok).toBe(false);
+    expect(planCrearCuenta(crear({ alias: ['999988887777'] }), SNAP, TODAY).ok).toBe(false);
+  });
+
+  it('una cuenta que ya lo tiene sigue editable y se le puede quitar', () => {
+    const conNumero = { ...PRESTAMO, alias: ['el prestamo', '999988887777'] };
+    const snap: ConfigSnapshot = { ...SNAP, cuentas: [BANCO, TARJETA, conNumero] };
+    const r = planEditarCuenta(base({ quitarAlias: ['999988887777'] }), snap, TODAY);
+    if (!r.ok) throw new Error(r.errors.join('; '));
+    expect(r.value.despues.alias).toEqual(['el prestamo']);
   });
 });
