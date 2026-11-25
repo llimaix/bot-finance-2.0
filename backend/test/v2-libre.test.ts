@@ -103,7 +103,7 @@ describe('render', () => {
 
   it('muestra el desglose y el libre después del ingreso', () => {
     const html = renderLibre(calcularLibre(base()), 10_000);
-    for (const parte of ['Libre hasta tu próximo ingreso', 'Salario el 30-nov · en 8 días', '− Recurrentes: Q80.00 (Netflix 25-nov)', '− Día a día: Q800.00 (Q100.00 × 8 días)', 'libre hasta el 15-dic', 'Deuda total: Q2,500.00']) {
+    for (const parte of ['Libre hasta tu próximo ingreso', 'Salario el 30-nov · en 8 días', '− Recurrentes: Q80.00 (Netflix 25-nov)', '− Día a día: Q800.00 (Q100.00 × 8 días)', 'libre hasta el 15-dic', 'Deuda de tarjetas: Q2,500.00']) {
       expect(html, parte).toContain(parte);
     }
   });

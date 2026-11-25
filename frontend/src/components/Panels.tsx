@@ -79,7 +79,8 @@ export function Hero({ d }: { d: Dashboard }) {
       )}
       <div className="hero-stats">
         <Stat icon={<Wallet size={16} />} label="Disponible" value={q(r.disponible)} />
-        <Stat icon={<Card size={16} />} label="Deuda" value={q(r.deuda)} />
+        <Stat icon={<Card size={16} />} label="Tarjetas" value={q(r.deuda)} />
+        {r.prestamos > 0 && <Stat icon={<Bank size={16} />} label="Préstamos" value={q(r.prestamos)} />}
         <Stat icon={<TrendUp size={16} />} label="Neto" value={q(r.neto)} />
       </div>
     </section>
@@ -311,6 +312,37 @@ export function Cuentas({ d }: { d: Dashboard }) {
                 <span className="acc-share" style={{ width: `${(Math.max(c.saldo, 0) / total) * 100}%` }} />
               </span>
               <b className={c.saldo < 0 ? 'neg' : undefined}>{q(c.saldo)}</b>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  );
+}
+
+// ── Préstamos ───────────────────────────────────────────────────────────────
+
+export function Prestamos({ d }: { d: Dashboard }) {
+  if (d.prestamos.length === 0) return null;
+  return (
+    <Section icon={<Bank />} title="Préstamos" aside={q0(d.resumen.prestamos)}>
+      <ul className="accounts">
+        {d.prestamos.map((p) => {
+          const detalle = [
+            ...(p.cuota !== null ? [`cuota ${q(p.cuota)}`] : []),
+            ...(p.diaPago !== null ? [`el ${p.diaPago}`] : []),
+            ...(p.vence !== null ? [`vence ${fecha(p.vence)} ${p.vence.slice(0, 4)}`] : []),
+          ].join(' · ');
+          return (
+            <li key={p.id}>
+              <span className="acc-icon">
+                <Bank size={18} />
+              </span>
+              <span className="acc-name">
+                {p.nombre}
+                {detalle && <span className="acc-detail"> · {detalle}</span>}
+              </span>
+              <b className="neg">{q(p.deuda)}</b>
             </li>
           );
         })}

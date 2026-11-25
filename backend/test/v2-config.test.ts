@@ -12,6 +12,7 @@ import type { ConfigSnapshot, CrearCuentaInput, EditarCuentaInput } from '../src
 const TODAY = '2026-11-22';
 
 const sinCredito = { diaCorte: null, diaPago: null, limite: null, tasaInteres: null, periodoTasa: null } as const;
+const sinPrestamo = { cuotaMensual: null, plazoCuotas: null, vence: null } as const;
 
 const crear = (over: Partial<CrearCuentaInput>): CrearCuentaInput => ({
   nombre: 'Visa BAC',
@@ -25,6 +26,7 @@ const crear = (over: Partial<CrearCuentaInput>): CrearCuentaInput => ({
   limite: 10000,
   tasaInteres: 3.5,
   periodoTasa: 'mensual',
+  ...sinPrestamo,
   ...over,
 });
 
@@ -37,7 +39,9 @@ const editar = (over: Partial<EditarCuentaInput>): EditarCuentaInput => ({
   quitarTerminaciones: [],
   saldoActual: null,
   activa: null,
+  nuevoTipo: null,
   ...sinCredito,
+  ...sinPrestamo,
   ...over,
 });
 

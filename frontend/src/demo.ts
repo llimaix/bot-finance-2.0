@@ -19,7 +19,8 @@ export function demoDashboard(): Dashboard {
     resumen: {
       disponible: 812_550,
       deuda: 315_020,
-      neto: 497_530,
+      prestamos: 1_850_000,
+      neto: -1_352_470,
       libre: 286_400,
       libreDespues: 742_900,
       proximoIngreso: { descripcion: 'Salario', fecha: d(Math.min(dia + 6, 28)), monto: 900_000, dias: 6 },
@@ -29,6 +30,9 @@ export function demoDashboard(): Dashboard {
       { id: 'ahorro', nombre: 'Banco B Ahorro', tipo: 'banco', saldo: 120_000, terminaciones: [] },
       { id: 'efectivo', nombre: 'Efectivo', tipo: 'efectivo', saldo: 32_250, terminaciones: [] },
       { id: 'billetera', nombre: 'Billetera móvil', tipo: 'billetera', saldo: 15_000, terminaciones: [] },
+    ],
+    prestamos: [
+      { id: 'prestamo-demo', nombre: 'Préstamo Banco C', deuda: 1_850_000, cuota: 95_000, diaPago: 5, vence: '2030-06-05' },
     ],
     tarjetas: [
       {

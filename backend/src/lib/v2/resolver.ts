@@ -12,6 +12,7 @@
  */
 import { normalizeAlias } from './aliases';
 import type { ConfigSnapshot } from './config';
+import { esLiquida, esPrestamo, esTarjeta } from './model';
 import type { Cuenta } from './model';
 
 export type Resolucion =
@@ -49,7 +50,7 @@ function filtrarPorTipo(cuentas: Cuenta[], texto: string): Cuenta[] {
   const credito = /\bcredito\b/.test(texto);
   const debito = /\bdebito\b/.test(texto);
   if (credito === debito) return cuentas; // ninguna o ambas palabras: no filtra
-  return cuentas.filter((c) => (credito ? c.tipo === 'credito' : c.tipo !== 'credito'));
+  return cuentas.filter((c) => (credito ? esTarjeta(c) : esLiquida(c)));
 }
 
 export function resolverCuenta(
@@ -82,8 +83,9 @@ export function resolverCuenta(
   const entidades = snap.entidades.filter((e) => [e.nombre, ...e.alias].some((a) => mencionaA(normal, a)));
   if (entidades.length > 0) {
     const ids = new Set(entidades.map((e) => e.id));
+    // Nombrar el banco no apunta a su préstamo: ese se elige por su nombre o alias (paso 2).
     const candidatas = filtrarPorTipo(
-      activas.filter((c) => c.entidadId !== null && ids.has(c.entidadId)),
+      activas.filter((c) => c.entidadId !== null && ids.has(c.entidadId) && !esPrestamo(c)),
       normal,
     );
     if (candidatas.length === 1) return { tipo: 'cuenta', cuentaId: candidatas[0]!.id, fuente: 'alias' };

@@ -90,6 +90,7 @@ const base = (): DashboardInput => ({
   libre: {
     disponible: 500_000,
     deuda: 250_000,
+    prestamos: 0,
     ingreso: { descripcion: 'Salario', fecha: '2026-11-13', montoCentavos: 800_000 },
     dias: 10,
     tarjetas: [],
@@ -117,6 +118,7 @@ describe('dashboard', () => {
     expect(buildDashboard(base()).resumen).toEqual({
       disponible: 500_000,
       deuda: 250_000,
+      prestamos: 0,
       neto: 250_000,
       libre: 400_000,
       libreDespues: null,

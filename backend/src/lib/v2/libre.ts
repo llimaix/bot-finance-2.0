@@ -14,6 +14,7 @@ import { escapeHtml } from '../format';
 import { fechaPago } from './ciclos';
 import type { IngresoEsperado } from './ingresos';
 import { formatCents } from './money';
+import { totales } from './balance';
 import type { SaldoV2 } from './saldos';
 import type { TarjetaConCiclo } from './tarjetas';
 
@@ -42,7 +43,10 @@ interface Partida {
 
 export interface Libre {
   disponible: number;
+  /** Deuda de tarjetas. */
   deuda: number;
+  /** Deuda de préstamos: no entra en el libre (la cuota sí, como obligación). */
+  prestamos: number;
   ingreso: { descripcion: string; fecha: string; montoCentavos: number } | null;
   dias: number;
   tarjetas: Partida[];
@@ -81,13 +85,11 @@ function recurrentesEntre(input: LibreInput, desde: string, hasta: string): Part
 }
 
 export function calcularLibre(input: LibreInput): Libre {
-  const activos = input.saldos.filter((s) => s.cuenta.activa);
-  const disponible = activos.filter((s) => s.cuenta.tipo !== 'credito').reduce((a, s) => a + s.saldoCentavos, 0);
-  const deuda = activos.filter((s) => s.cuenta.tipo === 'credito').reduce((a, s) => a + Math.max(0, -s.saldoCentavos), 0);
+  const { disponible, deuda, prestamos } = totales(input.saldos);
 
   const [p1, p2] = input.proximos;
   if (!p1) {
-    return { disponible, deuda, ingreso: null, dias: 0, tarjetas: [], recurrentes: [], gastoVariable: 0, libreHastaIngreso: null, despues: null };
+    return { disponible, deuda, prestamos, ingreso: null, dias: 0, tarjetas: [], recurrentes: [], gastoVariable: 0, libreHastaIngreso: null, despues: null };
   }
 
   const hasta = p1.fecha;
@@ -115,6 +117,7 @@ export function calcularLibre(input: LibreInput): Libre {
   return {
     disponible,
     deuda,
+    prestamos,
     ingreso: { descripcion: p1.ingreso.descripcion, fecha: p1.fecha, montoCentavos: p1.ingreso.montoCentavos },
     dias,
     tarjetas,
@@ -129,7 +132,8 @@ export function renderLibre(l: Libre, gastoDiarioCentavos: number): string {
   if (!l.ingreso || l.libreHastaIngreso === null) {
     return [
       `💵 Disponible hoy: <b>${formatCents(l.disponible)}</b>`,
-      `💳 Deuda total: ${formatCents(l.deuda)}`,
+      `💳 Deuda de tarjetas: ${formatCents(l.deuda)}`,
+      ...(l.prestamos > 0 ? [`🧾 Préstamos: ${formatCents(l.prestamos)}`] : []),
       '',
       'Para calcular cuánto te queda libre necesito tus ingresos. Dímelo así: "me pagan Q8,000 el 15 y el último en mi BI débito".',
     ].join('\n');
@@ -148,6 +152,7 @@ export function renderLibre(l: Libre, gastoDiarioCentavos: number): string {
       ? ['', `Después de ${escapeHtml(l.ingreso.descripcion)} (${formatCents(l.ingreso.montoCentavos)}): ~<b>${formatCents(l.despues.libre)}</b> libre hasta el ${fecha(l.despues.hasta)}`]
       : []),
     '',
-    `💳 Deuda total: ${formatCents(l.deuda)} (el crédito disponible no cuenta como libre)`,
+    `💳 Deuda de tarjetas: ${formatCents(l.deuda)} (el crédito disponible no cuenta como libre)`,
+    ...(l.prestamos > 0 ? [`🧾 Préstamos: ${formatCents(l.prestamos)}`] : []),
   ].join('\n');
 }

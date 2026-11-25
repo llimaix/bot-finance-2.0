@@ -68,7 +68,7 @@ describe('saldos v2', () => {
     expect(html).toContain('BI Débito ••2222: <b>Q4,000.00</b>');
     expect(html).toContain('Efectivo: <b>Q0.00</b> <i>(sin saldo inicial)</i>');
     expect(html).toContain('Disponible: <b>Q4,000.00</b>');
-    expect(html).toContain('Deuda total: <b>Q800.00</b>');
+    expect(html).toContain('Deuda de tarjetas: <b>Q800.00</b>');
     expect(html).toContain('Neto: Q3,200.00');
     expect(html).not.toContain('Cuenta vieja');
   });

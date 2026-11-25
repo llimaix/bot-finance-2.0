@@ -78,6 +78,8 @@ export interface AccountBalance extends Account {
   balance: number;
   /** Movimientos posteriores a asOf que participaron en el cálculo. */
   movements: number;
+  /** Modelo v2: deuda de largo plazo. Su saldo es negativo y no es liquidez. */
+  prestamo?: boolean;
 }
 
 /**

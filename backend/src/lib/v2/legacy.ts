@@ -26,6 +26,8 @@ function metodoDe(tipo: TipoCuenta | undefined): Method {
       return 'efectivo';
     case 'billetera':
       return 'transferencia';
+    case 'prestamo':
+      return 'na';
     default:
       return 'na';
   }

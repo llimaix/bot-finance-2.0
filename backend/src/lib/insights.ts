@@ -59,7 +59,10 @@ export async function loadAdvisorData(today: string, daysInCurrentMonth: number)
     listBudgets(),
   ]);
 
-  const netoLiquido = Math.round(balances.reduce((acc, b) => acc + b.balance, 0) * 100) / 100;
+  // Neto líquido = cuentas menos deuda de tarjetas. Un préstamo es deuda de
+  // largo plazo: restarlo entero haría que todo análisis de corto plazo se vea en rojo.
+  const netoLiquido =
+    Math.round(balances.filter((b) => !b.prestamo).reduce((acc, b) => acc + b.balance, 0) * 100) / 100;
   const daysElapsed = daysElapsedInMonthGT();
 
   const detected = detectRecurring([...prev2Txns, ...prevTxns, ...monthTxns], {
@@ -198,7 +201,12 @@ export function paydayCoachInput(data: AdvisorData) {
     },
     colchonGastoVariable: { dias: diasColchon, porDia: data.proyeccion.gastoVariableDiario, total: colchonVariable },
     sugerenciaApartarAlCaer: round2(totalCompromisos + colchonVariable),
-    saldos: data.balances.map((b) => ({ cuenta: b.name, saldo: b.balance, estimado: b.estimated })),
+    saldos: data.balances.map((b) => ({
+      cuenta: b.name,
+      saldo: b.balance,
+      estimado: b.estimated,
+      ...(b.prestamo ? { esPrestamo: true } : {}),
+    })),
     netoLiquido: data.netoLiquido,
     proyeccionFinDeMes: data.proyeccion,
     metas: metasForCoach(data.metas),

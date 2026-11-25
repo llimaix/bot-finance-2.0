@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { loadDashboard } from './api';
 import type { LoadResult } from './api';
 import { Alert, Lock, Refresh } from './components/Icons';
-import { Categorias, Cuentas, Evolucion, GastoDiario, Hero, Kpis, Metas, Movimientos, Tarjetas } from './components/Panels';
+import { Categorias, Cuentas, Evolucion, GastoDiario, Hero, Kpis, Metas, Movimientos, Prestamos, Tarjetas } from './components/Panels';
 import { haptic } from './telegram';
 
 type State = { kind: 'loading' } | LoadResult;
@@ -86,6 +86,7 @@ export default function App() {
         <Tarjetas d={d} />
         <Metas d={d} />
         <Cuentas d={d} />
+        <Prestamos d={d} />
         <Movimientos d={d} />
       </div>
 

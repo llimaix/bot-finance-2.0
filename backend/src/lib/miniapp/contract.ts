@@ -12,7 +12,10 @@ export interface Dashboard {
   usuario: string | null;
   resumen: {
     disponible: number;
+    /** Deuda de tarjetas. */
     deuda: number;
+    /** Deuda de préstamos (largo plazo). */
+    prestamos: number;
     neto: number;
     /** null si no hay ingresos declarados. */
     libre: number | null;
@@ -33,6 +36,7 @@ export interface Dashboard {
     consumoPeriodo: number;
     interesEstimado: number | null;
   }>;
+  prestamos: Array<{ id: string; nombre: string; deuda: number; cuota: number | null; diaPago: number | null; vence: string | null }>;
   gastoMes: {
     mes: string;
     total: number;
