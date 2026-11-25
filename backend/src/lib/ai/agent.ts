@@ -375,14 +375,14 @@ export async function runAgent(
 
       crear_cuenta: tool({
         description:
-          'Configura una cuenta, tarjeta o préstamo NUEVO del usuario en el modelo nuevo de cuentas ("agrega mi Visa BAC terminada en 1111, corta el 15, pago el 5, límite Q10,000"). Si el banco no existe, se registra solo. Guarda directamente; el sistema muestra un resumen con botón Deshacer. No sirve para registrar movimientos ni cambia las cuentas actuales del bot. Si es de crédito y falta corte, pago o límite, PREGUNTA antes de llamarla. Un préstamo es tipo "prestamo" (nunca "banco"): su saldo es lo que se DEBE.',
+          'Configura una cuenta, tarjeta o préstamo NUEVO del usuario en el modelo nuevo de cuentas ("agrega mi Visa BAC terminada en 1111, corta el 15, pago el 5, límite Q10,000"). Si el banco no existe, se registra solo. Guarda directamente; el sistema muestra un resumen con botón Deshacer. No sirve para registrar movimientos. Si es de crédito y falta corte, pago o límite, PREGUNTA antes de llamarla. Un préstamo es tipo "prestamo" (nunca "banco"): su saldo es lo que se DEBE.',
         inputSchema: z.object({
           nombre: z.string().min(1).max(60).describe('Nombre visible, p. ej. "Visa BAC"'),
           tipo: z
             .enum(['banco', 'credito', 'efectivo', 'billetera', 'prestamo'])
             .describe('banco = cuenta de débito o ahorro; prestamo = préstamo bancario, hipotecario o personal'),
           entidad: z.string().nullable().describe('Banco, p. ej. "BAC"; null en efectivo'),
-          alias: z.array(z.string().min(1).max(40)).describe('Cómo la llama el usuario; [] si no dijo'),
+          alias: z.array(z.string().min(1).max(40)).describe('Cómo la llama el usuario; [] si no dijo. Nunca números de cuenta, tarjeta o préstamo'),
           terminaciones: z.array(z.string().regex(/^\d{4}$/)).describe('Últimos 4 dígitos de cada tarjeta; nunca el número completo'),
           saldoActual: z
             .number()

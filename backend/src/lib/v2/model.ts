@@ -15,7 +15,6 @@ import { isValidAmountCents } from './money';
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug en minúsculas con guiones');
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'fecha yyyy-mm-dd');
 const dayOfMonth = z.number().int().min(1).max(31);
-
 export const ACCOUNT_KINDS = ['banco', 'credito', 'efectivo', 'billetera', 'prestamo'] as const;
 export const TXN_KINDS = ['gasto', 'ingreso', 'transferencia'] as const;
 export const ACCOUNT_SOURCES = ['terminacion', 'alias', 'modelo', 'usuario'] as const;
@@ -76,6 +75,16 @@ export const esLiquida = (c: Pick<Cuenta, 'tipo'>): boolean =>
 export const esTarjeta = (c: Pick<Cuenta, 'tipo'>): boolean => c.tipo === 'credito';
 export const esPrestamo = (c: Pick<Cuenta, 'tipo'>): boolean => c.tipo === 'prestamo';
 /** El saldo se guarda como deuda en negativo. */
+/**
+ * Un alias nunca lleva un número de cuenta, tarjeta o préstamo (6+ dígitos
+ * seguidos, ignorando espacios y guiones): las terminaciones de 4 dígitos van
+ * en su propio campo. Se valida solo al AGREGAR alias, no en el esquema, para
+ * que una cuenta ya guardada con uno así siga cargando y se pueda corregir.
+ */
+export function aliasConNumero(alias: string): boolean {
+  return /\d{6,}/.test(alias.replace(/[\s-]/g, ''));
+}
+
 export const esDeuda = (c: Pick<Cuenta, 'tipo'>): boolean => esTarjeta(c) || esPrestamo(c);
 
 export const movimientoSchema = z.object({

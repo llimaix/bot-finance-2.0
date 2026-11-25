@@ -8,7 +8,7 @@
  */
 import { escapeHtml } from '../format';
 import { normalizeAlias } from './aliases';
-import { cuentaSchema, entidadSchema, esDeuda, validateConfig } from './model';
+import { aliasConNumero, cuentaSchema, entidadSchema, esDeuda, validateConfig } from './model';
 import type { Cuenta, EntidadBancaria } from './model';
 import { formatCents, toCents } from './money';
 
@@ -33,6 +33,14 @@ export function slugify(text: string): string {
 function uniqueId(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base;
   for (let i = 2; ; i++) if (!taken.has(`${base}-${i}`)) return `${base}-${i}`;
+}
+
+/** Error si algún alias nuevo trae un número de cuenta; null si todos sirven. */
+function errorAlias(nuevos: ReadonlyArray<string>): string | null {
+  const malos = nuevos.filter(aliasConNumero);
+  return malos.length > 0
+    ? `No guardo números de cuenta, tarjeta o préstamo como alias (${malos.length === 1 ? 'uno' : malos.length} rechazado${malos.length === 1 ? '' : 's'}). Para reconocer una tarjeta usa sus últimos 4 dígitos como terminación.`
+    : null;
 }
 
 const zodErrors = (issues: ReadonlyArray<{ path: PropertyKey[]; message: string }>): string[] =>
@@ -68,6 +76,8 @@ export function planEntidad(
   input: EntidadInput,
   snap: ConfigSnapshot,
 ): Plan<{ antes: EntidadBancaria | null; despues: EntidadBancaria }> {
+  const malAlias = errorAlias(input.agregarAlias);
+  if (malAlias) return { ok: false, errors: [malAlias] };
   const antes = findEntidad(input.nombre, snap.entidades) ?? null;
   const despues: EntidadBancaria = antes
     ? { ...antes, alias: unique([...antes.alias, ...input.agregarAlias]) }
@@ -150,6 +160,8 @@ export function planCrearCuenta(
   today: string,
 ): Plan<{ cuenta: Cuenta; entidadNueva: EntidadBancaria | null }> {
   const errors: string[] = [];
+  const malAlias = errorAlias(input.alias);
+  if (malAlias) errors.push(malAlias);
 
   let entidadId: string | null = null;
   let entidadNueva: EntidadBancaria | null = null;
@@ -243,6 +255,8 @@ export function planEditarCuenta(
     return { ok: false, errors: [`No encontré la cuenta "${input.cuenta}". Cuentas configuradas: ${disponibles}.`] };
   }
 
+  const malAlias = errorAlias(input.agregarAlias);
+  if (malAlias) return { ok: false, errors: [malAlias] };
   const tipo = input.nuevoTipo ?? antes.tipo;
   if (tipo !== antes.tipo && (tipo === 'credito' || antes.tipo === 'credito')) {
     return {

@@ -2,6 +2,7 @@
  * Servicio de configuración v2: planear (puro) → guardar con deshacer → resumen.
  * Lo usan las herramientas del agente y el comando /cuentas.
  */
+import { config } from '../config';
 import { toPlainText } from '../telegram';
 import {
   planCrearCuenta,
@@ -19,8 +20,11 @@ export type ServiceResult =
   | { ok: true; html: string; texto: string; undoId: string }
   | { ok: false; errors: string[] };
 
-const NOTA_V2 =
-  '<i>Es configuración del modelo nuevo de cuentas: se usará al activarlo. Hoy /saldo y los movimientos siguen con las cuentas actuales.</i>';
+/** Solo mientras el modelo v2 no está activo: con v2 activo la nota es falsa y confunde. */
+const notaV2 = (): string[] =>
+  config.accountsModel === 'v2'
+    ? []
+    : ['', '<i>Es configuración del modelo nuevo de cuentas: se usará al activarlo. Hoy /saldo y los movimientos siguen con las cuentas actuales.</i>'];
 
 const done = (html: string, undoId: string): ServiceResult => ({ ok: true, html, texto: toPlainText(html), undoId });
 
@@ -40,8 +44,7 @@ export async function crearCuenta(input: CrearCuentaInput, today: string): Promi
     '',
     resumenCuenta(cuenta, entidades),
     ...(entidadNueva ? ['', 'También registré el banco:', resumenEntidad(entidadNueva)] : []),
-    '',
-    NOTA_V2,
+    ...notaV2(),
   ].join('\n');
   return done(html, undoId);
 }
@@ -53,7 +56,7 @@ export async function editarCuenta(input: EditarCuentaInput, today: string): Pro
 
   const { antes, despues } = plan.value;
   const undoId = await saveWithUndo([cuentaWrite(despues, antes)]);
-  const html = ['✅ <b>Cuenta actualizada</b>', '', resumenCuenta(despues, snap.entidades), '', NOTA_V2].join('\n');
+  const html = ['✅ <b>Cuenta actualizada</b>', '', resumenCuenta(despues, snap.entidades), ...notaV2()].join('\n');
   return done(html, undoId);
 }
 
