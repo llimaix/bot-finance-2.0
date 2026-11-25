@@ -38,6 +38,7 @@ describe('foto diaria SNAP#', () => {
   const libre: Libre = {
     disponible: 520_000,
     deuda: 250_000,
+    prestamos: 0,
     ingreso: { descripcion: 'Salario', fecha: '2026-11-30', montoCentavos: 800_000 },
     dias: 8,
     tarjetas: [],

@@ -375,7 +375,11 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
 
   const contextInfo = [
     `Cuentas (saldo actual): ${balances
-      .map((b) => `${b.name} [id:${b.id}]: ${formatQ(b.balance)}${b.estimated ? ' (estimado)' : ''}`)
+      .map((b) =>
+        b.prestamo
+          ? `${b.name} [id:${b.id}, préstamo]: debe ${formatQ(Math.abs(b.balance))}`
+          : `${b.name} [id:${b.id}]: ${formatQ(b.balance)}${b.estimated ? ' (estimado)' : ''}`,
+      )
       .join('; ')}.`,
     // Modelo nuevo (v2): solo configuración, para que editar_cuenta sepa qué existe.
     `Cuentas configuradas en el modelo nuevo: ${
@@ -915,6 +919,7 @@ async function buildSnapshot(today: string) {
       saldo: b.balance,
       alCorteDe: b.asOf,
       estimado: b.estimated,
+      ...(b.prestamo ? { esPrestamo: true } : {}),
     })),
     netoLiquido: data.netoLiquido,
     recurrentes: data.recurrentes.slice(0, 15),

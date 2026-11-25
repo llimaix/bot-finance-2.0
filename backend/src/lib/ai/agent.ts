@@ -187,6 +187,17 @@ export interface AgentDeps {
   markRecurringPaid: (input: { descripcion: string }) => Promise<unknown>;
 }
 
+/** Campos de préstamo compartidos por crear_cuenta y editar_cuenta. */
+const PRESTAMO_CAMPOS = {
+  cuotaMensual: z.number().positive().nullable().describe('Cuota mensual del préstamo en quetzales; solo préstamos'),
+  plazoCuotas: z.number().int().positive().nullable().describe('Número total de cuotas del préstamo'),
+  vence: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .describe('Fecha de la última cuota, yyyy-mm-dd'),
+};
+
 export interface AgentResult {
   text: string;
   registered: Transaction[];
@@ -364,26 +375,32 @@ export async function runAgent(
 
       crear_cuenta: tool({
         description:
-          'Configura una cuenta o tarjeta NUEVA del usuario en el modelo nuevo de cuentas ("agrega mi Visa BAC terminada en 1111, corta el 15, pago el 5, límite Q10,000"). Si el banco no existe, se registra solo. Guarda directamente; el sistema muestra un resumen con botón Deshacer. No sirve para registrar movimientos ni cambia las cuentas actuales del bot. Si es de crédito y falta corte, pago o límite, PREGUNTA antes de llamarla.',
+          'Configura una cuenta, tarjeta o préstamo NUEVO del usuario en el modelo nuevo de cuentas ("agrega mi Visa BAC terminada en 1111, corta el 15, pago el 5, límite Q10,000"). Si el banco no existe, se registra solo. Guarda directamente; el sistema muestra un resumen con botón Deshacer. No sirve para registrar movimientos ni cambia las cuentas actuales del bot. Si es de crédito y falta corte, pago o límite, PREGUNTA antes de llamarla. Un préstamo es tipo "prestamo" (nunca "banco"): su saldo es lo que se DEBE.',
         inputSchema: z.object({
           nombre: z.string().min(1).max(60).describe('Nombre visible, p. ej. "Visa BAC"'),
-          tipo: z.enum(['banco', 'credito', 'efectivo', 'billetera']).describe('banco = cuenta de débito o ahorro'),
+          tipo: z
+            .enum(['banco', 'credito', 'efectivo', 'billetera', 'prestamo'])
+            .describe('banco = cuenta de débito o ahorro; prestamo = préstamo bancario, hipotecario o personal'),
           entidad: z.string().nullable().describe('Banco, p. ej. "BAC"; null en efectivo'),
           alias: z.array(z.string().min(1).max(40)).describe('Cómo la llama el usuario; [] si no dijo'),
           terminaciones: z.array(z.string().regex(/^\d{4}$/)).describe('Últimos 4 dígitos de cada tarjeta; nunca el número completo'),
-          saldoActual: z.number().nullable().describe('Saldo en quetzales; en crédito, la DEUDA actual en positivo; null si no lo dijo'),
-          diaCorte: z.number().int().min(1).max(31).nullable(),
-          diaPago: z.number().int().min(1).max(31).nullable(),
-          limite: z.number().positive().nullable().describe('Límite de crédito en quetzales'),
+          saldoActual: z
+            .number()
+            .nullable()
+            .describe('Saldo en quetzales; en crédito o préstamo, la DEUDA actual en positivo; null si no lo dijo'),
+          diaCorte: z.number().int().min(1).max(31).nullable().describe('Solo tarjetas'),
+          diaPago: z.number().int().min(1).max(31).nullable().describe('Tarjetas y préstamos'),
+          limite: z.number().positive().nullable().describe('Límite de crédito en quetzales; solo tarjetas'),
           tasaInteres: z.number().positive().nullable().describe('Tasa en porcentaje (3.5 = 3,5 %); opcional'),
           periodoTasa: z.enum(['mensual', 'anual']).nullable(),
+          ...PRESTAMO_CAMPOS,
         }),
         execute: async (input) => deps.createAccount(input),
       }),
 
       editar_cuenta: tool({
         description:
-          'Cambia una cuenta YA configurada en el modelo nuevo: nombre, alias, terminaciones, saldo, corte, pago, límite, tasa o cerrarla ("la 2222 también es de la Visa", "mi Visa ahora corta el 20"). Solo envía lo que cambia; el resto null o []. Guarda directamente; el sistema muestra un resumen con botón Deshacer.',
+          'Cambia una cuenta YA configurada en el modelo nuevo: nombre, alias, terminaciones, saldo, corte, pago, límite, tasa, datos del préstamo, tipo o cerrarla ("la 2222 también es de la Visa", "mi Visa ahora corta el 20", "el préstamo Promerica es un préstamo, no una cuenta de banco"). Solo envía lo que cambia; el resto null o []. Guarda directamente; el sistema muestra un resumen con botón Deshacer.',
         inputSchema: z.object({
           cuenta: z.string().min(1).describe('Nombre, alias, id o terminación de la cuenta'),
           nuevoNombre: z.string().min(1).max(60).nullable(),
@@ -391,13 +408,18 @@ export async function runAgent(
           quitarAlias: z.array(z.string().min(1).max(40)),
           agregarTerminaciones: z.array(z.string().regex(/^\d{4}$/)),
           quitarTerminaciones: z.array(z.string().regex(/^\d{4}$/)),
-          saldoActual: z.number().nullable().describe('En crédito, la DEUDA actual en positivo'),
+          saldoActual: z.number().nullable().describe('En crédito o préstamo, la DEUDA actual en positivo'),
           diaCorte: z.number().int().min(1).max(31).nullable(),
           diaPago: z.number().int().min(1).max(31).nullable(),
           limite: z.number().positive().nullable(),
           tasaInteres: z.number().positive().nullable(),
           periodoTasa: z.enum(['mensual', 'anual']).nullable(),
           activa: z.boolean().nullable().describe('false para cerrar la cuenta (conserva su historial)'),
+          nuevoTipo: z
+            .enum(['banco', 'efectivo', 'billetera', 'prestamo'])
+            .nullable()
+            .describe('Solo si el usuario corrige el tipo (p. ej. una cuenta que en realidad es un préstamo); las tarjetas no se convierten'),
+          ...PRESTAMO_CAMPOS,
         }),
         execute: async (input) => deps.editAccount(input),
       }),

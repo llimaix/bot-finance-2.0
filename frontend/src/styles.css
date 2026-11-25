@@ -205,7 +205,7 @@ summary:focus-visible {
 .hero-stats {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -766,6 +766,11 @@ summary:focus-visible {
   border-radius: 12px;
   background: var(--surface-2);
   color: var(--ink-2);
+}
+
+.acc-detail {
+  color: var(--muted);
+  font-size: 0.85em;
 }
 
 .acc-name {

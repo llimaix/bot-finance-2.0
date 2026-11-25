@@ -91,6 +91,7 @@ export function planIngreso(
   const cuenta = findCuenta(input.cuenta, snap.cuentas.filter((c) => c.activa));
   if (!cuenta) return { ok: false, errors: [`No encontré la cuenta "${input.cuenta}" para depositar el ingreso.`] };
   if (cuenta.tipo === 'credito') return { ok: false, errors: ['Un ingreso no se deposita en una tarjeta de crédito.'] };
+  if (cuenta.tipo === 'prestamo') return { ok: false, errors: ['Un ingreso no se deposita en un préstamo.'] };
 
   const slug = slugify(input.descripcion);
   const antes = ingresos.find((i) => i.slug === slug) ?? null;

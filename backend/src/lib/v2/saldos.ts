@@ -11,9 +11,10 @@ import type { AccountBalance } from '../accounts';
 import { queryRange } from '../dynamo';
 import { escapeHtml } from '../format';
 import type { AccountId, Transaction } from '../types';
-import { saldoCentavos } from './balance';
+import { saldoCentavos, totales } from './balance';
 import type { ConfigSnapshot } from './config';
 import { toMovimientos } from './legacy';
+import { esPrestamo } from './model';
 import type { Cuenta } from './model';
 import { formatCents, fromCents } from './money';
 import { loadSnapshot } from './repo';
@@ -25,7 +26,7 @@ export interface SaldoV2 {
   movimientos: number;
 }
 
-const EMOJI: Record<Cuenta['tipo'], string> = { banco: '🏦', credito: '💳', efectivo: '💵', billetera: '📱' };
+const EMOJI: Record<Cuenta['tipo'], string> = { banco: '🏦', credito: '💳', efectivo: '💵', billetera: '📱', prestamo: '🧾' };
 
 /** Cálculo puro: saldo de cada cuenta a partir de las transacciones guardadas. */
 export function computeSaldosV2(snap: ConfigSnapshot, txns: ReadonlyArray<Transaction>): SaldoV2[] {
@@ -58,6 +59,12 @@ function lineaCuenta(s: SaldoV2): string {
     const uso = c.credito.limiteCentavos > 0 ? Math.round((deuda / c.credito.limiteCentavos) * 100) : 0;
     return `${nombre}: debes <b>${formatCents(deuda)}</b> · disponible ${formatCents(disponible)} (${uso}% del límite)${estimado}`;
   }
+  if (esPrestamo(c)) {
+    const cuota = c.prestamo?.cuotaCentavos
+      ? ` · cuota ${formatCents(c.prestamo.cuotaCentavos)}${c.prestamo.diaPago ? ` el ${c.prestamo.diaPago}` : ''}`
+      : '';
+    return `${nombre}: debes <b>${formatCents(Math.max(0, -s.saldoCentavos))}</b>${cuota}${estimado}`;
+  }
   return `${nombre}: <b>${formatCents(s.saldoCentavos)}</b>${estimado}`;
 }
 
@@ -66,16 +73,16 @@ export function renderSaldosV2(saldos: ReadonlyArray<SaldoV2>): string {
   if (activos.length === 0) {
     return '💰 Aún no hay cuentas en el modelo nuevo. Dímelas en lenguaje natural, por ejemplo: "agrega mi BI débito terminada en 2222, tengo Q4,000".';
   }
-  const disponible = activos.filter((s) => s.cuenta.tipo !== 'credito').reduce((a, s) => a + s.saldoCentavos, 0);
-  const deuda = activos.filter((s) => s.cuenta.tipo === 'credito').reduce((a, s) => a + Math.max(0, -s.saldoCentavos), 0);
+  const { disponible, deuda, prestamos } = totales(saldos);
   return [
     '💰 <b>Tus saldos</b>',
     '',
     ...activos.map(lineaCuenta),
     '',
     `💵 Disponible: <b>${formatCents(disponible)}</b>`,
-    `💳 Deuda total: <b>${formatCents(deuda)}</b>`,
-    `🧮 Neto: ${formatCents(disponible - deuda)}`,
+    `💳 Deuda de tarjetas: <b>${formatCents(deuda)}</b>`,
+    ...(prestamos > 0 ? [`🧾 Préstamos: <b>${formatCents(prestamos)}</b>`] : []),
+    `🧮 Neto: ${formatCents(disponible - deuda - prestamos)}`,
     '',
     'Ajusta un saldo diciéndomelo, por ejemplo: "mi BI débito tiene Q4,000".',
   ].join('\n');
@@ -106,6 +113,7 @@ export function toLegacyBalances(saldos: ReadonlyArray<SaldoV2>): AccountBalance
       updatedAt: '',
       balance: fromCents(s.saldoCentavos),
       movements: s.movimientos,
+      ...(esPrestamo(s.cuenta) ? { prestamo: true } : {}),
     }));
 }
 

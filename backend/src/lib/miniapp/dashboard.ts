@@ -10,6 +10,7 @@ import { loadAdvisorData } from '../insights';
 import { currentUserName, loadProfile } from '../profile';
 import type { Transaction } from '../types';
 import type { Libre } from '../v2/libre';
+import { esLiquida, esPrestamo } from '../v2/model';
 import { toCents } from '../v2/money';
 import type { SaldoV2 } from '../v2/saldos';
 import { loadBalancesV2 } from '../v2/saldos';
@@ -56,7 +57,7 @@ export function buildDashboard(input: DashboardInput): Dashboard {
 
   const activas = input.saldos.filter((s) => s.cuenta.activa);
   const cuentas = activas
-    .filter((s) => s.cuenta.tipo !== 'credito')
+    .filter((s) => esLiquida(s.cuenta))
     .map((s) => ({
       id: s.cuenta.id,
       nombre: s.cuenta.nombre,
@@ -117,7 +118,8 @@ export function buildDashboard(input: DashboardInput): Dashboard {
     resumen: {
       disponible: l.disponible,
       deuda: l.deuda,
-      neto: l.disponible - l.deuda,
+      prestamos: l.prestamos,
+      neto: l.disponible - l.deuda - l.prestamos,
       libre: l.libreHastaIngreso,
       libreDespues: l.despues?.libre ?? null,
       proximoIngreso: l.ingreso
@@ -126,6 +128,16 @@ export function buildDashboard(input: DashboardInput): Dashboard {
     },
     cuentas,
     tarjetas,
+    prestamos: activas
+      .filter((s) => esPrestamo(s.cuenta))
+      .map((s) => ({
+        id: s.cuenta.id,
+        nombre: s.cuenta.nombre,
+        deuda: Math.max(0, -s.saldoCentavos),
+        cuota: s.cuenta.prestamo?.cuotaCentavos ?? null,
+        diaPago: s.cuenta.prestamo?.diaPago ?? null,
+        vence: s.cuenta.prestamo?.vence ?? null,
+      })),
     gastoMes: {
       mes,
       total,

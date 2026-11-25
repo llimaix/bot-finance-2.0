@@ -16,7 +16,7 @@ const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug en minúsculas
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'fecha yyyy-mm-dd');
 const dayOfMonth = z.number().int().min(1).max(31);
 
-export const ACCOUNT_KINDS = ['banco', 'credito', 'efectivo', 'billetera'] as const;
+export const ACCOUNT_KINDS = ['banco', 'credito', 'efectivo', 'billetera', 'prestamo'] as const;
 export const TXN_KINDS = ['gasto', 'ingreso', 'transferencia'] as const;
 export const ACCOUNT_SOURCES = ['terminacion', 'alias', 'modelo', 'usuario'] as const;
 
@@ -41,6 +41,15 @@ export const creditoSchema = z.object({
   interes: interesSchema.optional(),
 });
 
+/** Datos de un préstamo: todos opcionales, el saldo (deuda) vive en la semilla. */
+export const prestamoSchema = z.object({
+  cuotaCentavos: z.number().int().positive().optional(),
+  diaPago: dayOfMonth.optional(),
+  interes: interesSchema.optional(),
+  plazoCuotas: z.number().int().positive().optional(),
+  vence: isoDate.optional(),
+});
+
 export const cuentaSchema = z.object({
   id: slug,
   nombre: z.string().min(1).max(60),
@@ -53,8 +62,21 @@ export const cuentaSchema = z.object({
   estimada: z.boolean(),
   activa: z.boolean(),
   credito: creditoSchema.optional(),
+  prestamo: prestamoSchema.optional(),
 });
 export type Cuenta = z.infer<typeof cuentaSchema>;
+
+/**
+ * Única regla para clasificar cuentas. Antes se repetía `tipo !== 'credito'`
+ * en cada cálculo, y cualquier tipo nuevo (un préstamo) se colaba como efectivo.
+ */
+export const esLiquida = (c: Pick<Cuenta, 'tipo'>): boolean =>
+  c.tipo === 'banco' || c.tipo === 'efectivo' || c.tipo === 'billetera';
+/** Deuda de corto plazo: tarjetas de crédito. */
+export const esTarjeta = (c: Pick<Cuenta, 'tipo'>): boolean => c.tipo === 'credito';
+export const esPrestamo = (c: Pick<Cuenta, 'tipo'>): boolean => c.tipo === 'prestamo';
+/** El saldo se guarda como deuda en negativo. */
+export const esDeuda = (c: Pick<Cuenta, 'tipo'>): boolean => esTarjeta(c) || esPrestamo(c);
 
 export const movimientoSchema = z.object({
   fecha: isoDate,
@@ -102,6 +124,12 @@ export function validateMovimiento(m: Movimiento, cuentas: ReadonlyArray<Cuenta>
   if (m.tipo === 'ingreso' && m.destino !== null && byId.get(m.destino)?.tipo === 'credito') {
     warnings.push('Un ingreso hacia una tarjeta de crédito es raro: ¿no será un pago de tarjeta (transferencia)?');
   }
+  if (m.tipo === 'ingreso' && m.destino !== null && byId.get(m.destino)?.tipo === 'prestamo') {
+    warnings.push('Un ingreso hacia un préstamo es raro: ¿no será el pago de la cuota (transferencia)?');
+  }
+  if (m.tipo === 'gasto' && m.origen !== null && byId.get(m.origen)?.tipo === 'prestamo') {
+    warnings.push('Un gasto pagado desde un préstamo es raro: ¿no salió de tu cuenta de banco?');
+  }
   return { errors, warnings };
 }
 
@@ -125,6 +153,7 @@ export function validateConfig(cuentas: ReadonlyArray<Cuenta>, entidades: Readon
     }
     if (c.tipo !== 'credito' && c.credito) errors.push(`Solo las tarjetas de crédito tienen datos de crédito ("${c.id}").`);
     if (c.tipo === 'credito' && !c.credito) errors.push(`La tarjeta "${c.id}" necesita corte, pago y límite.`);
+    if (c.tipo !== 'prestamo' && c.prestamo) errors.push(`Solo los préstamos tienen datos de préstamo ("${c.id}").`);
   }
 
   // Un alias normalizado pertenece a una sola entidad o cuenta.

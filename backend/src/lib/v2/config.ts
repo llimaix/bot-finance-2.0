@@ -8,7 +8,7 @@
  */
 import { escapeHtml } from '../format';
 import { normalizeAlias } from './aliases';
-import { cuentaSchema, entidadSchema, validateConfig } from './model';
+import { cuentaSchema, entidadSchema, esDeuda, validateConfig } from './model';
 import type { Cuenta, EntidadBancaria } from './model';
 import { formatCents, toCents } from './money';
 
@@ -97,21 +97,51 @@ export interface CreditoInput {
   periodoTasa: 'mensual' | 'anual' | null;
 }
 
-export interface CrearCuentaInput extends CreditoInput {
+/** Datos propios de un préstamo (el día de pago y la tasa se comparten con CreditoInput). */
+export interface PrestamoInput {
+  /** Cuota mensual en quetzales. */
+  cuotaMensual: number | null;
+  /** Número total de cuotas. */
+  plazoCuotas: number | null;
+  /** yyyy-mm-dd de la última cuota. */
+  vence: string | null;
+}
+
+export interface CrearCuentaInput extends CreditoInput, PrestamoInput {
   nombre: string;
   tipo: Cuenta['tipo'];
   /** Nombre o alias del banco; si no existe, se crea la entidad. null en efectivo. */
   entidad: string | null;
   alias: string[];
   terminaciones: string[];
-  /** Saldo actual en quetzales; en crédito, la DEUDA actual como número positivo. */
+  /** Saldo actual en quetzales; en crédito o préstamo, la DEUDA actual como número positivo. */
   saldoActual: number | null;
 }
 
 const tasaToBps = (tasa: number): number => Math.round(tasa * 100);
 
+/** En tarjetas y préstamos el saldo es la deuda en negativo. */
 function semilla(tipo: Cuenta['tipo'], saldoActual: number): number {
-  return tipo === 'credito' ? -toCents(Math.abs(saldoActual)) : toCents(saldoActual);
+  return esDeuda({ tipo }) ? -toCents(Math.abs(saldoActual)) : toCents(saldoActual);
+}
+
+const tocaPrestamo = (i: PrestamoInput): boolean => [i.cuotaMensual, i.plazoCuotas, i.vence].some((v) => v !== null);
+
+/** Combina los datos de préstamo existentes con lo que pide el usuario. */
+function datosPrestamo(
+  antes: Cuenta['prestamo'],
+  input: PrestamoInput & Pick<CreditoInput, 'diaPago' | 'tasaInteres' | 'periodoTasa'>,
+): NonNullable<Cuenta['prestamo']> {
+  return {
+    ...(antes ?? {}),
+    ...(input.cuotaMensual !== null ? { cuotaCentavos: toCents(input.cuotaMensual) } : {}),
+    ...(input.diaPago !== null ? { diaPago: input.diaPago } : {}),
+    ...(input.plazoCuotas !== null ? { plazoCuotas: input.plazoCuotas } : {}),
+    ...(input.vence !== null ? { vence: input.vence } : {}),
+    ...(input.tasaInteres !== null
+      ? { interes: { tasaBps: tasaToBps(input.tasaInteres), periodo: input.periodoTasa ?? antes?.interes?.periodo ?? 'anual' } }
+      : {}),
+  };
 }
 
 export function planCrearCuenta(
@@ -134,6 +164,16 @@ export function planCrearCuenta(
       };
       entidadId = entidadNueva.id;
     }
+  }
+
+  if (input.tipo !== 'credito' && (input.diaCorte !== null || input.limite !== null)) {
+    errors.push('Solo las tarjetas de crédito tienen día de corte y límite.');
+  }
+  if (input.tipo !== 'prestamo' && tocaPrestamo(input)) {
+    errors.push('Solo los préstamos tienen cuota, plazo y vencimiento.');
+  }
+  if (!['credito', 'prestamo'].includes(input.tipo) && (input.diaPago !== null || input.tasaInteres !== null)) {
+    errors.push('El día de pago y la tasa solo aplican a tarjetas de crédito y préstamos.');
   }
 
   let credito: Cuenta['credito'];
@@ -168,6 +208,7 @@ export function planCrearCuenta(
     estimada: input.saldoActual === null,
     activa: true,
     ...(credito ? { credito } : {}),
+    ...(input.tipo === 'prestamo' ? { prestamo: datosPrestamo(undefined, input) } : {}),
   };
 
   const parsed = cuentaSchema.safeParse(cuenta);
@@ -177,7 +218,7 @@ export function planCrearCuenta(
   return v.errors.length > 0 ? { ok: false, errors: v.errors } : { ok: true, value: { cuenta, entidadNueva } };
 }
 
-export interface EditarCuentaInput extends CreditoInput {
+export interface EditarCuentaInput extends CreditoInput, PrestamoInput {
   /** id, nombre, alias o terminación de la cuenta a editar. */
   cuenta: string;
   nuevoNombre: string | null;
@@ -187,6 +228,8 @@ export interface EditarCuentaInput extends CreditoInput {
   quitarTerminaciones: string[];
   saldoActual: number | null;
   activa: boolean | null;
+  /** Cambio de tipo entre cuentas que no son tarjeta (p. ej. banco → préstamo). */
+  nuevoTipo: Cuenta['tipo'] | null;
 }
 
 export function planEditarCuenta(
@@ -200,10 +243,34 @@ export function planEditarCuenta(
     return { ok: false, errors: [`No encontré la cuenta "${input.cuenta}". Cuentas configuradas: ${disponibles}.`] };
   }
 
-  const tocaCredito = [input.diaCorte, input.diaPago, input.limite, input.tasaInteres].some((v) => v !== null);
-  if (tocaCredito && antes.tipo !== 'credito') {
-    return { ok: false, errors: [`"${antes.nombre}" no es una tarjeta de crédito: no tiene corte, pago, límite ni tasa.`] };
+  const tipo = input.nuevoTipo ?? antes.tipo;
+  if (tipo !== antes.tipo && (tipo === 'credito' || antes.tipo === 'credito')) {
+    return {
+      ok: false,
+      errors: [`No puedo convertir "${antes.nombre}" de ${antes.tipo} a ${tipo}: una tarjeta se crea o se cierra, no se convierte.`],
+    };
   }
+  const tocaCredito = [input.diaCorte, input.diaPago, input.limite, input.tasaInteres].some((v) => v !== null);
+  if ((input.diaCorte !== null || input.limite !== null) && tipo !== 'credito') {
+    return { ok: false, errors: [`"${antes.nombre}" no es una tarjeta de crédito: no tiene corte ni límite.`] };
+  }
+  if (tocaCredito && tipo !== 'credito' && tipo !== 'prestamo') {
+    return { ok: false, errors: [`"${antes.nombre}" no es tarjeta ni préstamo: no tiene día de pago ni tasa.`] };
+  }
+  if (tocaPrestamo(input) && tipo !== 'prestamo') {
+    return { ok: false, errors: [`"${antes.nombre}" no es un préstamo: no tiene cuota, plazo ni vencimiento.`] };
+  }
+
+  // Al pasar de cuenta líquida a deuda (o al revés) sin saldo nuevo, la semilla
+  // cambia de signo: un préstamo guardado como "banco" con su deuda en positivo
+  // queda como deuda en negativo.
+  const cambiaSigno = esDeuda(antes) !== esDeuda({ tipo });
+  const nuevaSemilla =
+    input.saldoActual !== null
+      ? { semillaCentavos: semilla(tipo, input.saldoActual), asOf: today, estimada: false }
+      : cambiaSigno
+        ? { semillaCentavos: esDeuda({ tipo }) ? -Math.abs(antes.semillaCentavos) : Math.abs(antes.semillaCentavos) }
+        : {};
 
   const quitarAlias = new Set(input.quitarAlias.map(normalizeAlias));
   const quitarTerm = new Set(input.quitarTerminaciones.map((t) => t.trim()));
@@ -212,11 +279,15 @@ export function planEditarCuenta(
     nombre: input.nuevoNombre?.trim() || antes.nombre,
     alias: unique([...antes.alias, ...input.agregarAlias]).filter((a) => !quitarAlias.has(normalizeAlias(a))),
     terminaciones: unique([...antes.terminaciones, ...input.agregarTerminaciones]).filter((t) => !quitarTerm.has(t)),
+    tipo,
     activa: input.activa ?? antes.activa,
-    ...(input.saldoActual !== null
-      ? { semillaCentavos: semilla(antes.tipo, input.saldoActual), asOf: today, estimada: false }
-      : {}),
+    ...nuevaSemilla,
   };
+  if (tipo === 'prestamo') {
+    despues.prestamo = datosPrestamo(antes.prestamo, input);
+  } else {
+    delete despues.prestamo;
+  }
   if (antes.credito && tocaCredito) {
     despues.credito = {
       ...antes.credito,
@@ -243,8 +314,14 @@ export function planEditarCuenta(
 
 // ── Resúmenes (HTML de Telegram, valores escapados) ────────────────────────
 
-const ICONO: Record<Cuenta['tipo'], string> = { banco: '🏦', credito: '💳', efectivo: '💵', billetera: '📱' };
-const TIPO: Record<Cuenta['tipo'], string> = { banco: 'banco', credito: 'crédito', efectivo: 'efectivo', billetera: 'billetera' };
+const ICONO: Record<Cuenta['tipo'], string> = { banco: '🏦', credito: '💳', efectivo: '💵', billetera: '📱', prestamo: '🧾' };
+const TIPO: Record<Cuenta['tipo'], string> = {
+  banco: 'banco',
+  credito: 'crédito',
+  efectivo: 'efectivo',
+  billetera: 'billetera',
+  prestamo: 'préstamo',
+};
 
 export function resumenEntidad(e: EntidadBancaria): string {
   return `🏛️ <b>${escapeHtml(e.nombre)}</b> · alias: ${escapeHtml(e.alias.join(', ') || '—')}`;
@@ -268,6 +345,17 @@ export function resumenCuenta(c: Cuenta, entidades: ReadonlyArray<EntidadBancari
     lineas.push(
       `Corte ${c.credito.diaCorte} · pago ${c.credito.diaPago} · límite ${formatCents(c.credito.limiteCentavos)}${interes}`,
     );
+    lineas.push(`Deuda: ${formatCents(Math.max(0, -c.semillaCentavos))}${c.estimada ? ' (sin dato aún)' : ''}`);
+  } else if (c.tipo === 'prestamo') {
+    const p = c.prestamo ?? {};
+    const datos = [
+      ...(p.cuotaCentavos ? [`cuota ${formatCents(p.cuotaCentavos)}`] : []),
+      ...(p.diaPago ? [`pago el ${p.diaPago}`] : []),
+      ...(p.interes ? [`interés ${p.interes.tasaBps / 100}% ${p.interes.periodo}`] : []),
+      ...(p.plazoCuotas ? [`${p.plazoCuotas} cuotas`] : []),
+      ...(p.vence ? [`vence ${p.vence}`] : []),
+    ];
+    if (datos.length > 0) lineas.push(datos.join(' · '));
     lineas.push(`Deuda: ${formatCents(Math.max(0, -c.semillaCentavos))}${c.estimada ? ' (sin dato aún)' : ''}`);
   } else {
     lineas.push(`Saldo: ${formatCents(c.semillaCentavos)}${c.estimada ? ' (sin dato aún)' : ''}`);
