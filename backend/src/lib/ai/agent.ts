@@ -231,6 +231,11 @@ export async function runAgent(
       ? parsedTransactionSchema.extend({
           origen: cuentaRef.nullable().describe('id de la cuenta de donde SALE el dinero; null = de fuera'),
           destino: cuentaRef.nullable().describe('id de la cuenta a donde ENTRA el dinero; null = hacia fuera'),
+          interes: z
+            .number()
+            .nonnegative()
+            .nullable()
+            .describe('Solo en el pago de un préstamo: intereses en Q que trae el estado de cuenta, si el usuario los dio; null = los calcula el sistema'),
         })
       : parsedTransactionSchema
   ) as typeof parsedTransactionSchema;
@@ -250,7 +255,7 @@ export async function runAgent(
         description:
           'Registra movimientos de dinero NUEVOS del usuario (gastos, ingresos, retiros, depósitos, transferencias). NO la uses para movimientos que ya aparecen en el contexto o la conversación, ni cuando el usuario está cuadrando/reconciliando sus cuentas: ahí corresponde consultar, corregir o eliminar. Declara en newCategories cualquier categoría nueva que uses.' +
           (deps.cuentasV2Ids
-            ? ' MODELO NUEVO: indica origen (cuenta de donde SALE el dinero) y destino (a donde ENTRA) con los ids de "Cuentas configuradas en el modelo nuevo"; null = fuera de tus cuentas. El campo method se ignora. Si no sabes la cuenta, PREGUNTA antes de registrar.'
+            ? ' MODELO NUEVO: indica origen (cuenta de donde SALE el dinero) y destino (a donde ENTRA) con los ids de "Cuentas configuradas en el modelo nuevo"; null = fuera de tus cuentas. El campo method se ignora. Si no sabes la cuenta, PREGUNTA antes de registrar. El pago de un préstamo es UNA transferencia por el monto total de la cuota (origen = banco, destino = préstamo): el sistema la parte en intereses y capital. Nunca registres los intereses aparte.'
             : ''),
         inputSchema: z.object({
           transactions: z.array(txnSchema).min(1),
