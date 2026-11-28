@@ -13,17 +13,20 @@ import { escapeHtml } from '../format';
 import type { AccountId, Transaction } from '../types';
 import { saldoCentavos, totales } from './balance';
 import type { ConfigSnapshot } from './config';
+import { porFacturarTarjeta } from './cuotas';
 import { toMovimientos } from './legacy';
 import { esPrestamo } from './model';
 import type { Cuenta } from './model';
 import { formatCents, fromCents } from './money';
-import { loadSnapshot } from './repo';
+import { loadPlanesCuotas, loadSnapshot } from './repo';
 
 export interface SaldoV2 {
   cuenta: Cuenta;
   saldoCentavos: number;
   /** Movimientos posteriores a la semilla que tocaron la cuenta. */
   movimientos: number;
+  /** Solo tarjetas: compras a cuotas que faltan cargar; el banco ya las restó del disponible. */
+  porFacturarCentavos?: number;
 }
 
 const EMOJI: Record<Cuenta['tipo'], string> = { banco: '🏦', credito: '💳', efectivo: '💵', billetera: '📱', prestamo: '🧾' };
@@ -44,8 +47,12 @@ export async function loadBalancesV2(today: string): Promise<{ snap: ConfigSnaps
   const snap = await loadSnapshot();
   if (snap.cuentas.length === 0) return { snap, saldos: [] };
   const minAsOf = snap.cuentas.reduce((min, c) => (c.asOf < min ? c.asOf : min), today);
-  const txns = await queryRange(minAsOf, today);
-  return { snap, saldos: computeSaldosV2(snap, txns) };
+  const [txns, planes] = await Promise.all([queryRange(minAsOf, today), loadPlanesCuotas()]);
+  const saldos = computeSaldosV2(snap, txns).map((s) => {
+    const porFacturar = porFacturarTarjeta(planes, s.cuenta, today);
+    return porFacturar > 0 ? { ...s, porFacturarCentavos: porFacturar } : s;
+  });
+  return { snap, saldos };
 }
 
 function lineaCuenta(s: SaldoV2): string {
@@ -55,9 +62,11 @@ function lineaCuenta(s: SaldoV2): string {
   const nombre = `${EMOJI[c.tipo]} ${escapeHtml(c.nombre)}${terms}`;
   if (c.tipo === 'credito' && c.credito) {
     const deuda = Math.max(0, -s.saldoCentavos);
-    const disponible = c.credito.limiteCentavos - deuda;
-    const uso = c.credito.limiteCentavos > 0 ? Math.round((deuda / c.credito.limiteCentavos) * 100) : 0;
-    return `${nombre}: debes <b>${formatCents(deuda)}</b> · disponible ${formatCents(disponible)} (${uso}% del límite)${estimado}`;
+    const porFacturar = s.porFacturarCentavos ?? 0;
+    const disponible = c.credito.limiteCentavos - deuda - porFacturar;
+    const uso = c.credito.limiteCentavos > 0 ? Math.round(((deuda + porFacturar) / c.credito.limiteCentavos) * 100) : 0;
+    const cuotas = porFacturar > 0 ? ` · cuotas por facturar ${formatCents(porFacturar)}` : '';
+    return `${nombre}: debes <b>${formatCents(deuda)}</b>${cuotas} · disponible ${formatCents(disponible)} (${uso}% del límite)${estimado}`;
   }
   if (esPrestamo(c)) {
     const cuota = c.prestamo?.cuotaCentavos

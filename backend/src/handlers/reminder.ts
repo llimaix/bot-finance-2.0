@@ -8,6 +8,7 @@ import { logger } from '../lib/logger';
 import { loadProfile } from '../lib/profile';
 import { loadSecrets } from '../lib/secrets';
 import { sendMessage } from '../lib/telegram';
+import { generarCuotasPendientes } from '../lib/v2/cuotas-service';
 import { alertasTarjetas, loadCiclos } from '../lib/v2/tarjetas';
 import { proximosIngresos } from '../lib/v2/ingresos';
 import { loadIngresos } from '../lib/v2/repo';
@@ -26,6 +27,11 @@ export const handler = async (event: ScheduleEvent): Promise<void> => {
   const today = todayGT();
 
   if (event.kind === 'guardian') {
+    // Primero las cuotas que vencen hoy (compras a cuotas), para que los avisos
+    // de abajo ya las vean. Si falla, se reintenta mañana sin duplicar (SK fijo).
+    if (config.accountsModel === 'v2') {
+      await generarCuotasPendientes(today).catch((err) => logger.error('cuotas automáticas fallaron', { error: String(err) }));
+    }
     // Vigilancia diaria con reglas deterministas: solo habla si hay hallazgos.
     const data = await loadAdvisorData(today, daysInMonth(monthPrefixGT(0)));
     const findings = guardianFindings(data);

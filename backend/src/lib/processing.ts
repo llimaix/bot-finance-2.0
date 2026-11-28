@@ -72,6 +72,10 @@ import { planRegistroV2 } from './v2/registro';
 import type { PropuestaV2 } from './v2/registro';
 import { configurarIngreso, crearCuenta, editarCuenta, gestionarEntidad, loadIngresos, loadSnapshot, renderConfig } from './v2/service';
 import type { ServiceResult } from './v2/service';
+import { cancelarCompraCuotas, crearCompraCuotas } from './v2/cuotas-service';
+import { resumenPlan } from './v2/cuotas';
+import type { PlanCuotas } from './v2/cuotas';
+import { loadPlanesCuotas } from './v2/repo';
 import { buildReport } from './report';
 import { getSttProvider } from './stt';
 import { answerCallbackQuery, getFileBuffer, sendDocument, sendMessage, sendTyping } from './telegram';
@@ -364,14 +368,25 @@ function describeReceiptForAgent(outcome: ParseOutcome, caption: string | null, 
 
 async function agentFlow(chatId: number, today: string, userText: string, transcript?: string): Promise<void> {
   await sendTyping(chatId);
-  const [history, balances, cats, facts, recent, configV2] = await Promise.all([
+  const [history, balances, cats, facts, recent, configV2, planesCuotas] = await Promise.all([
     getConversation(),
     loadBalances(today),
     listCategories(),
     listFacts(),
     queryRange(daysAgoGT(1), today),
     loadConfigV2(),
+    // Como la configuración v2: si falla la lectura, el turno sigue sin las cuotas.
+    loadPlanesCuotas().catch((err): PlanCuotas[] => {
+      logger.error('no se pudieron leer las compras a cuotas', { error: String(err) });
+      return [];
+    }),
   ]);
+  const cuotasActivas = planesCuotas
+    .filter((p) => p.activo)
+    .flatMap((p) => {
+      const tarjeta = configV2.cuentas.find((c) => c.id === p.tarjetaId);
+      return tarjeta?.credito ? [`${resumenPlan(p, tarjeta.credito.diaCorte, today)} [id:${p.id}, ${tarjeta.nombre}]`] : [];
+    });
 
   const contextInfo = [
     `Cuentas (saldo actual): ${balances
@@ -389,6 +404,7 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
             .join('; ')
         : 'ninguna todavía'
     }.`,
+    ...(cuotasActivas.length > 0 ? [`Compras a cuotas activas (el sistema carga cada cuota en su corte; NO las registres): ${cuotasActivas.join('; ')}.`] : []),
     `Catálogo de categorías: ${cats.map((c) => c.name).join(', ')}.`,
     ...(facts.length > 0
       ? [`Hechos que el usuario te ha enseñado:\n${facts.map((f) => `- ${f.text}`).join('\n')}`]
@@ -472,6 +488,8 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     createAccount: async (input) => sendConfigResult(chatId, await crearCuenta(input, today)),
     editAccount: async (input) => sendConfigResult(chatId, await editarCuenta(input, today)),
     configureIncome: async (input) => sendConfigResult(chatId, await configurarIngreso(input)),
+    createInstallments: async (input) => sendConfigResult(chatId, await crearCompraCuotas(input, today)),
+    cancelInstallments: async (input) => sendConfigResult(chatId, await cancelarCompraCuotas(input, today)),
     correctMovement: async ({ numero, fecha, cambios }) => {
       // Defensa en profundidad: el esquema ya exige > 0, pero `??` dejaría
       // pasar un 0 y un negativo invertiría los saldos.

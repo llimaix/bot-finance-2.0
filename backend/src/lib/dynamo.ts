@@ -83,6 +83,24 @@ export async function markReportedAndReserveShortIds(date: string, count: number
   return Array.from({ length: count }, (_, i) => last - count + 1 + i);
 }
 
+/**
+ * Reserva shortIds SIN marcar el día como reportado: para movimientos que crea
+ * el sistema (cuotas), que no deben apagar el recordatorio del día.
+ */
+export async function reserveShortIds(date: string, count: number): Promise<number[]> {
+  const res = await doc.send(
+    new UpdateCommand({
+      TableName: config.tableName,
+      Key: { PK: pk(), SK: `DAY#${date}` },
+      UpdateExpression: 'ADD lastShortId :n',
+      ExpressionAttributeValues: { ':n': count },
+      ReturnValues: 'UPDATED_NEW',
+    }),
+  );
+  const last = Number(res.Attributes?.lastShortId ?? count);
+  return Array.from({ length: count }, (_, i) => last - count + 1 + i);
+}
+
 export async function markReported(date: string): Promise<void> {
   await markReportedAndReserveShortIds(date, 0);
 }

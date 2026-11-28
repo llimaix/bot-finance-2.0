@@ -2,6 +2,7 @@
  * Persistencia de la configuración v2 (IO). Claves:
  *   CTA#<id>   cuenta      (no ACC#: ese prefijo es del modelo v1 y se cruzarían)
  *   BNK#<id>   entidad bancaria
+ *   CUO#<id>   compra a cuotas (plan); sus cuotas son TXN# con SK determinista
  *   UNDO#<id>  versión anterior de lo guardado, para ↩️ Deshacer (TTL 24 h)
  */
 import { ulid } from 'ulid';
@@ -10,6 +11,9 @@ import { logger } from '../logger';
 import type { ConfigSnapshot } from './config';
 import { cuentaSchema, entidadSchema } from './model';
 import type { Cuenta, EntidadBancaria } from './model';
+import type { Transaction } from '../types';
+import { planCuotasSchema } from './cuotas';
+import type { PlanCuotas } from './cuotas';
 import { ingresoSchema } from './ingresos';
 import type { IngresoEsperado } from './ingresos';
 
@@ -83,6 +87,30 @@ export async function applyUndo(undoId: string): Promise<boolean> {
   await deleteItemBySk(sk);
   logger.info('configuración deshecha', { undoId, items: ops.length });
   return true;
+}
+
+// ── Compras a cuotas (CUO#<id>) ────────────────────────────────────────────
+
+export const planSk = (id: string): string => `CUO#${id}`;
+
+export async function loadPlanesCuotas(): Promise<PlanCuotas[]> {
+  const planes: PlanCuotas[] = [];
+  for (const raw of await queryItemsByPrefix('CUO#')) {
+    const parsed = planCuotasSchema.safeParse(withoutKeys(raw));
+    if (parsed.success) planes.push(parsed.data);
+    else logger.error('plan de cuotas inválido en la tabla', { sk: raw.SK });
+  }
+  return planes;
+}
+
+export function planWrite(plan: PlanCuotas, previous: PlanCuotas | null): Write {
+  return { sk: planSk(plan.id), value: { ...plan }, previous: previous ? { ...previous } : null };
+}
+
+/** Un movimiento nuevo como escritura con deshacer (deshacer lo borra). */
+export function txnWrite(txn: Transaction): Write {
+  const { sk, ...rest } = txn;
+  return { sk, value: { ...rest }, previous: null };
 }
 
 // ── Ingresos esperados (INC#<slug>) ────────────────────────────────────────
