@@ -7,6 +7,8 @@ import { logger } from '../logger';
 import { ACCOUNT_IDS, METHODS, TXN_TYPES } from '../types';
 import type { AccountId, ConversationMessage, Transaction } from '../types';
 import type { CrearCuentaInput, EditarCuentaInput, EntidadInput } from '../v2/config';
+import type { CompraCuotasInput } from '../v2/cuotas';
+import type { CancelarCuotasInput } from '../v2/cuotas-service';
 import type { IngresoInput } from '../v2/ingresos';
 import { getAgentModel, logUsage, stripThinking } from './llm';
 import { buildAgentSystemPrompt } from './prompts';
@@ -165,6 +167,9 @@ export interface AgentDeps {
   createAccount: (input: CrearCuentaInput) => Promise<unknown>;
   editAccount: (input: EditarCuentaInput) => Promise<unknown>;
   configureIncome: (input: IngresoInput) => Promise<unknown>;
+  /** Compras a cuotas sin intereses (v2): guardan y envían el resumen con ↩️ Deshacer. */
+  createInstallments: (input: CompraCuotasInput) => Promise<unknown>;
+  cancelInstallments: (input: CancelarCuotasInput) => Promise<unknown>;
   searchMovements: (input: {
     desde: string;
     hasta: string;
@@ -441,6 +446,30 @@ export async function runAgent(
           activo: z.boolean().nullable(),
         }),
         execute: async (input) => deps.configureIncome(input),
+      }),
+
+      registrar_compra_cuotas: tool({
+        description:
+          'Registra una compra a cuotas SIN intereses con tarjeta de crédito (Visacuotas, "a 10 cuotas"). NO uses registrar_movimientos para ella: la compra no entra completa a la tarjeta. El sistema carga una cuota (total / cuotas) en cada corte, empezando en el primer corte desde la compra, y resta lo que falta facturar del disponible. Guarda directamente; el sistema muestra un resumen con botón Deshacer.',
+        inputSchema: z.object({
+          tarjeta: z.string().min(1).describe('Tarjeta de crédito: nombre, alias o terminación'),
+          descripcion: z.string().min(1).max(80).describe('Qué se compró, p. ej. "Refrigeradora"'),
+          categoria: z.string().min(1).describe('Categoría del catálogo'),
+          montoTotal: z.number().positive().describe('Monto TOTAL de la compra en quetzales (no la cuota)'),
+          cuotas: z.number().int().min(2).max(60),
+          fechaCompra: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().describe('yyyy-mm-dd; null = hoy'),
+        }),
+        execute: async (input) => deps.createInstallments(input),
+      }),
+
+      cancelar_compra_cuotas: tool({
+        description:
+          'Cierra una compra a cuotas activa (ver "Compras a cuotas activas" en el contexto). cargarResto=true si el usuario la liquidó antes de tiempo: carga hoy a la tarjeta lo que faltaba facturar. cargarResto=false si se devolvió o no debe cargarse nada más.',
+        inputSchema: z.object({
+          compra: z.string().min(1).describe('Descripción o id de la compra a cuotas'),
+          cargarResto: z.boolean(),
+        }),
+        execute: async (input) => deps.cancelInstallments(input),
       }),
 
       buscar_movimientos: tool({

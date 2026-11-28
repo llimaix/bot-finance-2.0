@@ -8,10 +8,11 @@ import { escapeHtml } from '../format';
 import { cicloTarjeta } from './ciclos';
 import type { CicloTarjeta } from './ciclos';
 import type { ConfigSnapshot } from './config';
+import { lineasPlanes, porFacturarTarjeta } from './cuotas';
 import { toMovimientos } from './legacy';
 import type { Cuenta } from './model';
 import { formatCents } from './money';
-import { loadSnapshot } from './repo';
+import { loadPlanesCuotas, loadSnapshot } from './repo';
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const fecha = (iso: string): string => `${Number(iso.slice(8, 10))}-${MESES[Number(iso.slice(5, 7)) - 1]}`;
@@ -21,6 +22,10 @@ const dias = (desde: string, hasta: string): number =>
 export interface TarjetaConCiclo {
   cuenta: Cuenta;
   ciclo: CicloTarjeta;
+  /** Compras a cuotas: lo que falta cargar (centavos). El banco ya lo bloqueó del límite. */
+  porFacturar?: number;
+  /** Una línea por compra a cuotas con saldo por facturar. */
+  cuotas?: string[];
 }
 
 export async function loadCiclos(today: string): Promise<{ snap: ConfigSnapshot; tarjetas: TarjetaConCiclo[] }> {
@@ -28,12 +33,21 @@ export async function loadCiclos(today: string): Promise<{ snap: ConfigSnapshot;
   const credito = snap.cuentas.filter((c) => c.activa && c.tipo === 'credito' && c.credito);
   if (credito.length === 0) return { snap, tarjetas: [] };
   const minAsOf = credito.reduce((min, c) => (c.asOf < min ? c.asOf : min), today);
-  const movs = toMovimientos(await queryRange(minAsOf, today));
+  const [txns, planes] = await Promise.all([queryRange(minAsOf, today), loadPlanesCuotas()]);
+  const movs = toMovimientos(txns);
   return {
     snap,
-    tarjetas: credito.map((cuenta) => ({ cuenta, ciclo: cicloTarjeta(cuenta, movs, today)! })),
+    tarjetas: credito.map((cuenta) => ({
+      cuenta,
+      ciclo: cicloTarjeta(cuenta, movs, today)!,
+      porFacturar: porFacturarTarjeta(planes, cuenta, today),
+      cuotas: lineasPlanes(planes, cuenta, today),
+    })),
   };
 }
+
+/** Deuda más cuotas por facturar: lo que el banco ya descontó del límite. */
+const comprometido = (t: TarjetaConCiclo): number => t.ciclo.deudaActual + (t.porFacturar ?? 0);
 
 const nombre = (c: Cuenta): string =>
   `${escapeHtml(c.nombre)}${c.terminaciones.length > 0 ? ` ${c.terminaciones.map((t) => `••${t}`).join(', ')}` : ''}`;
@@ -42,9 +56,11 @@ export function renderTarjetas(tarjetas: ReadonlyArray<TarjetaConCiclo>, hoy: st
   if (tarjetas.length === 0) {
     return '💳 No tienes tarjetas de crédito configuradas. Dímelas así: "agrega mi Visa BAC terminada en 1111, corta el 15, pago el 5, límite Q10,000".';
   }
-  const bloques = tarjetas.map(({ cuenta, ciclo }) => {
+  const bloques = tarjetas.map((t) => {
+    const { cuenta, ciclo } = t;
     const limite = cuenta.credito!.limiteCentavos;
-    const uso = limite > 0 ? Math.round((ciclo.deudaActual / limite) * 100) : 0;
+    const uso = limite > 0 ? Math.round((comprometido(t) / limite) * 100) : 0;
+    const porFacturar = t.porFacturar ?? 0;
     const faltan = dias(hoy, ciclo.fechaPago);
     const lineas = [
       `💳 <b>${nombre(cuenta)}</b>`,
@@ -58,7 +74,10 @@ export function renderTarjetas(tarjetas: ReadonlyArray<TarjetaConCiclo>, hoy: st
         ? [`Si no pagas el total, interés estimado: ~${formatCents(ciclo.interesEstimado)}`]
         : []),
       `Periodo actual: ${formatCents(ciclo.consumoPeriodo)} · próximo corte ${fecha(ciclo.proximoCorte)}`,
-      `Deuda total ${formatCents(ciclo.deudaActual)} de ${formatCents(limite)} (${uso}%)`,
+      porFacturar > 0
+        ? `Deuda total ${formatCents(ciclo.deudaActual)} + cuotas por facturar ${formatCents(porFacturar)} · disponible ${formatCents(limite - comprometido(t))} de ${formatCents(limite)} (${uso}%)`
+        : `Deuda total ${formatCents(ciclo.deudaActual)} de ${formatCents(limite)} (${uso}%)`,
+      ...(t.cuotas ?? []),
     ];
     return lineas.join('\n');
   });
@@ -68,7 +87,8 @@ export function renderTarjetas(tarjetas: ReadonlyArray<TarjetaConCiclo>, hoy: st
 /** Avisos del guardián de las 08:30 (sección 5.3). Vacío si no hay nada que decir. */
 export function alertasTarjetas(tarjetas: ReadonlyArray<TarjetaConCiclo>, hoy: string): string[] {
   const alertas: string[] = [];
-  for (const { cuenta, ciclo } of tarjetas) {
+  for (const t of tarjetas) {
+    const { cuenta, ciclo } = t;
     const n = nombre(cuenta);
     const credito = cuenta.credito!;
     if (dias(hoy, ciclo.proximoCorte) === 3) {
@@ -87,8 +107,8 @@ export function alertasTarjetas(tarjetas: ReadonlyArray<TarjetaConCiclo>, hoy: s
     if (ciclo.pendiente > 0 && faltan < 0) {
       alertas.push(`⚠️ Venció el pago de ${n} (${fecha(ciclo.fechaPago)}) y faltan ${formatCents(ciclo.pendiente)}.`);
     }
-    if (credito.limiteCentavos > 0 && ciclo.deudaActual / credito.limiteCentavos > 0.8) {
-      alertas.push(`📈 ${n} al ${Math.round((ciclo.deudaActual / credito.limiteCentavos) * 100)}% de su límite.`);
+    if (credito.limiteCentavos > 0 && comprometido(t) / credito.limiteCentavos > 0.8) {
+      alertas.push(`📈 ${n} al ${Math.round((comprometido(t) / credito.limiteCentavos) * 100)}% de su límite.`);
     }
   }
   return alertas;
