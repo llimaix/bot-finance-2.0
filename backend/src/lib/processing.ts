@@ -409,23 +409,28 @@ async function agentFlow(chatId: number, today: string, userText: string, transc
     ...(modelV2 ? { cuentasV2Ids: configV2.cuentas.filter((c) => c.activa).map((c) => c.id) } : {}),
     register: async (input) => {
       const outcome = await materializeParsed(input);
+      const avisosRegistro: string[] = [];
       if (modelV2) {
         // origen/destino llegan intactos (materializeParsed conserva los campos
         // extra); el CÓDIGO decide la cuenta y valida. Si algo no cuadra, no se
         // guarda nada y el agente pregunta.
-        const plan = planRegistroV2(outcome.transactions as Array<DatedTransaction & PropuestaV2>, userText, configV2);
+        // Deuda actual de cada préstamo: el registro parte sus pagos en capital e interés.
+        const deudas = new Map(balances.filter((b) => b.prestamo).map((b) => [b.id as string, Math.max(0, -toCents(b.balance))]));
+        const plan = planRegistroV2(outcome.transactions as Array<DatedTransaction & PropuestaV2>, userText, configV2, null, deudas);
         if (!plan.ok) {
           return { txns: [], createdCategories: [], totalSpentToday: 0, advertencias: [], errores: plan.errores };
         }
         outcome.transactions = plan.txns;
+        avisosRegistro.push(...plan.avisos);
       }
       const txns = await persistOutcome(outcome, userText, today);
       // Los txns YA están escritos: un fallo de LECTURA aquí no debe hacer
       // rechazar (haría creer al agente que no guardó → la red re-registraría).
-      const [todayTxns, advertencias] = await Promise.all([
+      const [todayTxns, advertenciasGuard] = await Promise.all([
         queryDay(today).catch(() => txns),
         warningsFor(txns).catch(() => [] as string[]),
       ]);
+      const advertencias = [...avisosRegistro, ...advertenciasGuard];
       collectedWarnings.push(...advertencias);
       return {
         txns,

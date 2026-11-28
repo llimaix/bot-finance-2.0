@@ -9,7 +9,8 @@ import type { Method, TransactionV2, TxnType } from '../types';
 import type { ConfigSnapshot } from './config';
 import { legacyFields } from './legacy';
 import { validateMovimiento } from './model';
-import { toCents } from './money';
+import { formatCents, toCents } from './money';
+import { partirPago, tasaMensual } from './prestamos';
 import { resolverCuenta } from './resolver';
 
 /** Lo mínimo de un movimiento ya materializado (monto en Q, fecha resuelta). */
@@ -22,13 +23,15 @@ export interface PropuestaV2 {
   /** Lo que propuso el modelo (ids de cuentas v2) o null. */
   origen?: string | null;
   destino?: string | null;
+  /** Solo pagos de préstamo: interés en Q del estado de cuenta; null = lo calcula el sistema. */
+  interes?: number | null;
 }
 
 /** Movimiento listo para guardar: sin la propuesta cruda del modelo, con v2 y los campos v1 derivados. */
-export type MovimientoV2Listo<T> = Omit<T, 'origen' | 'destino'> & { amount: number; type: TxnType; method: Method; v2: TransactionV2 };
+export type MovimientoV2Listo<T> = Omit<T, 'origen' | 'destino' | 'interes'> & { amount: number; type: TxnType; method: Method; v2: TransactionV2 };
 
 export type RegistroV2<T> =
-  | { ok: true; txns: Array<MovimientoV2Listo<T>> }
+  | { ok: true; txns: Array<MovimientoV2Listo<T>>; avisos: string[] }
   | { ok: false; errores: string[] };
 
 const tipoV2 = (type: TxnType): TransactionV2['tipo'] =>
@@ -39,6 +42,8 @@ export function planRegistroV2<T extends PropuestaV2>(
   userText: string,
   snap: ConfigSnapshot,
   terminacionImagen: string | null = null,
+  /** Deuda actual (centavos, en positivo) de cada préstamo, para partir sus pagos en capital e interés. */
+  deudas: ReadonlyMap<string, number> = new Map(),
 ): RegistroV2<T> {
   if (snap.cuentas.filter((c) => c.activa).length === 0) {
     return {
@@ -53,7 +58,10 @@ export function planRegistroV2<T extends PropuestaV2>(
   const nombre = (id: string) => snap.cuentas.find((c) => c.id === id)?.nombre ?? id;
 
   const errores: string[] = [];
+  const avisos: string[] = [];
   const txns: Array<MovimientoV2Listo<T>> = [];
+  // Deuda que queda tras cada pago: dos cuotas en el mismo mensaje no se calculan sobre el mismo saldo.
+  const deudaRestante = new Map(deudas);
 
   for (const [i, p] of propuestas.entries()) {
     const tipo = tipoV2(p.type);
@@ -95,9 +103,45 @@ export function planRegistroV2<T extends PropuestaV2>(
       continue;
     }
     // origen/destino viven en v2: no se guardan sueltos en el item.
-    const { origen: _origen, destino: _destino, ...resto } = p;
+    const { origen: _origen, destino: _destino, interes: _interes, ...resto } = p;
+
+    // Pago a un préstamo con tasa: el CÓDIGO lo parte en interés (gasto) y
+    // capital (transferencia). Solo el capital baja la deuda.
+    const prestamo = tipo === 'transferencia' ? snap.cuentas.find((c) => c.id === destino) : undefined;
+    const tasa = prestamo ? tasaMensual(prestamo) : null;
+    if (prestamo && tasa !== null) {
+      const deuda = deudaRestante.get(prestamo.id) ?? 0;
+      const interesEstado = p.interes != null ? toCents(p.interes) : null;
+      const { interesCentavos, capitalCentavos } = partirPago(v2.montoCentavos, deuda, tasa, interesEstado);
+      deudaRestante.set(prestamo.id, deuda - capitalCentavos);
+      if (interesCentavos > 0) {
+        const v2Interes: TransactionV2 = { montoCentavos: interesCentavos, tipo: 'gasto', origen, destino: null, cuentaFuente };
+        txns.push({
+          ...resto,
+          category: 'deuda',
+          description: `Intereses ${prestamo.nombre}`,
+          ...legacyFields(v2Interes, snap.cuentas),
+          v2: v2Interes,
+        });
+      }
+      if (capitalCentavos > 0) {
+        const v2Capital: TransactionV2 = { ...v2, montoCentavos: capitalCentavos };
+        txns.push({
+          ...resto,
+          description: `Capital ${prestamo.nombre}`,
+          ...legacyFields(v2Capital, snap.cuentas),
+          v2: v2Capital,
+        });
+      } else {
+        avisos.push(
+          `El pago de ${formatCents(v2.montoCentavos)} a ${prestamo.nombre} no cubre los intereses del mes: todo se fue a intereses y la deuda no bajó.`,
+        );
+      }
+      continue;
+    }
+
     txns.push({ ...resto, ...legacyFields(v2, snap.cuentas), v2 });
   }
 
-  return errores.length > 0 ? { ok: false, errores } : { ok: true, txns };
+  return errores.length > 0 ? { ok: false, errores } : { ok: true, txns, avisos };
 }
